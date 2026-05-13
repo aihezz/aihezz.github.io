@@ -1,9 +1,9 @@
 # 站点基础信息
 title: "aihezz 的技术博客"
 author: "aihezz"
-email: "your-email@example.com" # 你的联系邮箱，会显示在页脚
+email: "ai_android_eh@163.com" # 你的联系邮箱，会显示在页脚
 description: >- # 这段描述会出现在搜索引擎结果中
-  记录 Android 与 AI 相关的技术探索与深度思考。
+  Android 与 AI 相关的技术探索与深度思考
 
 # 站点 URL 与基础路径
 # 必须将 url 设置为你的站点地址
