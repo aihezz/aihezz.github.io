@@ -1,0 +1,52 @@
+# 站点基础信息
+title: "aihezz 的技术博客"
+author: "aihezz"
+email: "your-email@example.com" # 你的联系邮箱，会显示在页脚
+description: >- # 这段描述会出现在搜索引擎结果中
+  记录 Android 与 AI 相关的技术探索与深度思考。
+
+# 站点 URL 与基础路径
+# 必须将 url 设置为你的站点地址
+url: "https://aihezz.github.io"
+# baseurl 保持为空，因为这是用户站点
+baseurl: ""
+
+# 主题与布局
+# 使用 GitHub Pages 官方支持的 minima 主题
+theme: minima
+
+# 导航栏页面
+# 这里列出的文件会成为顶部导航栏的链接
+header_pages:
+  - about.md
+  - index.md
+
+# Jekyll 插件配置
+# 这些是 GitHub Pages 环境默认支持的常用插件，无需手动安装
+plugins:
+  - jekyll-feed # 为你的博客生成 RSS feed
+  - jekyll-seo-tag # 自动生成 SEO 友好的元标签
+
+# 构建设置
+# 设置文章的永久链接格式
+permalink: /posts/:title/
+
+# 本地化设置
+# 设置站点语言为中文
+lang: zh-CN
+# 设置时区为上海
+timezone: Asia/Shanghai
+
+# 排除文件
+# Jekyll 在构建时会忽略这些文件/文件夹
+exclude:
+  - .sass-cache/
+  - .jekyll-cache/
+  - gemfiles/
+  - Gemfile
+  - Gemfile.lock
+  - node_modules/
+  - vendor/bundle/
+  - vendor/cache/
+  - vendor/gems/
+  - vendor/ruby/
