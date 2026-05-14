@@ -19,6 +19,7 @@ theme: minima
 # 这里列出的文件会成为顶部导航栏的链接
 header_pages:
   - about.md
+  - leetcode.md
   - index.md
 
 # Jekyll 插件配置
