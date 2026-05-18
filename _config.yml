@@ -21,6 +21,7 @@ plugins:
   - jekyll-seo-tag
   - jekyll-archives
   - jekyll-sitemap
+  - jekyll-include-cache
 
 # Chirpy 必需的配置
 paginate: 10
