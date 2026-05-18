@@ -1,16 +1,6 @@
 ---
-layout: page
+layout: category
 title: Android
-permalink: /Android/
+category: Android
+icon: fab fa-android
 ---
-
-## Android
-
-<ul>
-  {% for post in site.categories.leetcode %}
-  <li>
-    <a href="{{ post.url | relative_url }}">{{ post.title }}</a>
-    <span>{{ post.date | date: "%Y-%m-%d" }}</span>
-  </li>
-  {% endfor %}
-</ul>
