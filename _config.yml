@@ -12,31 +12,32 @@ url: "https://aihezz.github.io"
 baseurl: ""
 
 # 主题与布局
-# 使用 GitHub Pages 官方支持的 minima 主题
-theme: minima
-
-# 导航栏页面
-# 这里列出的文件会成为顶部导航栏的链接
-header_pages:
-  - about.md
-  - android.md
-  - index.md
+# 使用 Chirpy 主题 (remote_theme 方式)
+remote_theme: cotes2020/jekyll-theme-chirpy
 
 # Jekyll 插件配置
-# 这些是 GitHub Pages 环境默认支持的常用插件，无需手动安装
 plugins:
-  - jekyll-feed # 为你的博客生成 RSS feed
-  - jekyll-seo-tag # 自动生成 SEO 友好的元标签
+  - jekyll-paginate
+  - jekyll-seo-tag
+  - jekyll-archives
+  - jekyll-sitemap
 
-# 构建设置
-# 设置文章的永久链接格式
-permalink: /posts/:title/
-
-# 本地化设置
-# 设置站点语言为中文
-lang: zh-CN
-# 设置时区为上海
+# Chirpy 必需的配置
+paginate: 10
 timezone: Asia/Shanghai
+lang: zh-CN
+
+github:
+  username: aihezz
+
+avatar: # 可选，侧边栏头像，可以填你的 github 头像链接或其他图床链接
+  # url: "https://github.com/aihezz.png"
+
+social:
+  name: aihezz
+  email: ai_android_eh@163.com
+  github: aihezz
+  # twitter: username
 
 # 排除文件
 # Jekyll 在构建时会忽略这些文件/文件夹

@@ -7,8 +7,6 @@ tags: [android, kotlin]
 lang: zh-CN
 ---
 
-# Android 透明 Activity 底部灰色条解决方案
-
 在开发全透明中转/授权页时，经常会遇到在页面切换时底部导航栏区域出现灰色/黑色半透明条的问题。这通常是由系统原生的 `Theme.Translucent` 历史包袱、Android 10+ 引入的对比度保护（Contrast Enforcement）以及未做 Edge-to-Edge 布局延伸导致的。
 
 以下整理了两种解决该问题的兼容方案。

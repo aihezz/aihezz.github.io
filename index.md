@@ -1,4 +1,4 @@
 ---
 layout: home
-title: 首页
+title: Home
 ---
