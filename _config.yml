@@ -12,8 +12,7 @@ url: "https://aihezz.github.io"
 baseurl: ""
 
 # 主题与布局
-# theme: jekyll-theme-chirpy
-remote_theme: cotes2020/jekyll-theme-chirpy
+theme: jekyll-theme-chirpy
 
 # Jekyll 插件配置
 plugins:
