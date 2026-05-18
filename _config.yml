@@ -1,5 +1,5 @@
 # 站点基础信息
-title: "aihezz 的技术博客"
+title: "aihezz 的博客"
 author: "aihezz"
 email: "ai_android_eh@163.com" # 你的联系邮箱，会显示在页脚
 description: >- # 这段描述会出现在搜索引擎结果中
@@ -30,7 +30,9 @@ lang: zh-CN
 github:
   username: aihezz
 
-avatar: "https://github.com/aihezz.png"
+img_cdn: ""
+
+avatar: https://github.com/aihezz.png
 
 social:
   name: aihezz
@@ -64,3 +66,22 @@ kramdown:
     block:
       line_numbers: true
       start_line: 1
+
+collections:
+  tabs:
+    output: true
+    sort_by: order
+
+defaults:
+  - scope:
+      path: ""
+      type: posts
+    values:
+      layout: post
+      comments: true
+  - scope:
+      path: ""
+      type: tabs
+    values:
+      layout: page
+      permalink: /:title/
