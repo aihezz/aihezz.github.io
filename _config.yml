@@ -30,8 +30,7 @@ lang: zh-CN
 github:
   username: aihezz
 
-avatar: # 可选，侧边栏头像，可以填你的 github 头像链接或其他图床链接
-  url: "https://github.com/aihezz.png"
+avatar: "https://github.com/aihezz.png"
 
 social:
   name: aihezz
