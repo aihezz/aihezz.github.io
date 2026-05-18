@@ -1,10 +1,10 @@
 ---
 layout: page
-title: leetcode
-permalink: /leetcode/
+title: Android
+permalink: /Android/
 ---
 
-## leetcode
+## Android
 
 <ul>
   {% for post in site.categories.leetcode %}
