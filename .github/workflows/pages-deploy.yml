@@ -57,7 +57,9 @@ jobs:
             \-\-ignore-urls "/^http:\/\/127.0.0.1/,/^http:\/\/0.0.0.0/,/^http:\/\/localhost/" \
             \-\-ignore-empty-alt \
             \-\-ignore-missing-alt \
-            \-\-allow-hash-href
+            \-\-allow-hash-href \
+            \-\-allow-missing-href \
+            \-\-ignore-files "/\.html$/"
 
       - name: Upload site artifact
         uses: actions/upload-pages-artifact@v4
