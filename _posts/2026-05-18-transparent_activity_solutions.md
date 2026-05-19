@@ -33,46 +33,29 @@ lang: zh-CN
 
     <!-- 1. 让窗口完全透明，透视到底层 Activity -->
     <item name="android:windowIsTranslucent">true</item>
-
     <item name="android:windowBackground">@android:color/transparent</item>
-
-   
 
     <!-- 2. 去除系统和 AppCompat 的标题栏 -->
     <item name="android:windowNoTitle">true</item>
-
     <item name="windowNoTitle">true</item>
-
     <item name="windowActionBar">false</item>
-
-   
 
     <!-- 3. 将系统状态栏和导航栏背景色设为透明 -->
     <item name="android:statusBarColor">@android:color/transparent</item>
-
     <item name="android:navigationBarColor">@android:color/transparent</item>
-
     <!-- 允许系统栏绘制背景，使上面的透明颜色生效 -->
     <item name="android:windowDrawsSystemBarBackgrounds">true</item>
 
-   
-
     <!-- 4. 去除页面底部的灰色半透明蒙层效果 -->
     <item name="android:backgroundDimEnabled">false</item>
-
     <item name="android:windowContentOverlay">@null</item>
-
-   
 
     <!-- 5. 关闭 Android 10+ 的导航栏对比度保护，防止系统强制加上灰色条 -->
     <!-- 注意：此属性需在 API 29+ 才能完全生效，建议同时在 values-v29 中定义 -->
     <item name="android:enforceNavigationBarContrast">false</item>
 
-   
-
     <!-- (可选) 去除进出场动画 -->
     <item name="android:windowAnimationStyle">@null</item>
-
 </style>
 ```
 
@@ -99,26 +82,15 @@ lang: zh-CN
 <style name="Theme.Transparent.NoActionBar.Minimal" parent="Theme.AppCompat.NoActionBar">
 
     <item name="android:windowIsTranslucent">true</item>
-
     <item name="android:windowBackground">@android:color/transparent</item>
 
-   
-
     <item name="android:windowNoTitle">true</item>
-
     <item name="windowNoTitle">true</item>
-
     <item name="windowActionBar">false</item>
 
-   
-
     <item name="android:backgroundDimEnabled">false</item>
-
     <item name="android:windowContentOverlay">@null</item>
-
     <item name="android:windowAnimationStyle">@null</item>
-
-   
 
     <!-- 依然保留对比度关闭作为双重保险 -->
     <item name="android:enforceNavigationBarContrast">false</item>
@@ -148,7 +120,6 @@ fun ComponentActivity.setupImmersiveTransparentBars(isLightIcon: Boolean = true)
     window.statusBarColor = Color.TRANSPARENT
     window.navigationBarColor = Color.TRANSPARENT
    
-
     // 3. 针对 Android 10+，在代码层面关闭对比度保护机制
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
         window.isNavigationBarContrastEnforced = false
@@ -168,12 +139,10 @@ class MyTransparentActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
        
-
         // 在 setContentView 前后调用均可
         // 假设底层页面偏亮，要求当前透明页展示深色系统图标
         setupImmersiveTransparentBars(isLightIcon = true)
        
-
         setContentView(R.layout.activity_my_transparent)
     }
 }
