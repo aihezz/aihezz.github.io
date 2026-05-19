@@ -93,7 +93,3 @@ defaults:
     values:
       layout: category
       permalink: /categories/:title/
-  - scope:
-      path: "_tabs/android.md"
-    values:
-      layout: category
