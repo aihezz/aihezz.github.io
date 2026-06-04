@@ -56,10 +56,10 @@ class DemoFragment : Fragment() {
 
 
 ## 二、完整执行流程
-### 3.1 前置概念
+### 2.1 前置概念
 分析`lifecycleScope.launch(Dispatchers.Main) {}` 执行流程之前，先简单介绍下`lifecycleScope`、`launch` 是什么？
 
-#### 3.1.1 **lifecycleScope  是什么？**
+#### 2.1 **lifecycleScope  是什么？**
 lifecycleScope  是 Android KTX 提供的一个扩展属性。当你调用它时，系统会为当前的  LifecycleOwner （比如 Activity 或 Fragment）绑定并返回一个  LifecycleCoroutineScope 。
 
 ```kotlin
@@ -87,7 +87,7 @@ internal class LifecycleCoroutineScopeImpl(
 
 
 
-#### 3.1.2 CoroutineScope.launch 方法？
+#### 2.2 CoroutineScope.launch 方法？
 CoroutineScope.launch  方法的作用可以高度概括为：**在不阻塞当前线程的情况下，启动一个新的协程，并返回一个指向该协程的 ** Job ** 对象，用于管理它的生命周期 。 **
 
 ```kotlin
@@ -107,7 +107,7 @@ public fun CoroutineScope.launch(
 
 
 
-### 3.2 执行流程
+### 2.2 执行流程
 整个流程分为三个核心步骤：合并协程上下文、创建协程对象、启动协程。 
 
 ```kotlin
@@ -130,7 +130,7 @@ public fun CoroutineScope.launch(
 
 
 
-#### 3.2.1 步骤一：合并协程上下文
+#### 2.2.1 步骤一：合并协程上下文
 ```kotlin
 public fun CoroutineScope.launch(                                                                                                                                                          
         context: CoroutineContext = EmptyCoroutineContext,                                                                                                                                     
@@ -150,10 +150,10 @@ public fun CoroutineScope.launch(
 
 我们分以下步骤来揭开这个底层逻辑：
 
-##### 3.2.1.1 **CoroutineContext 本质是一个“特殊的 Map”**
+##### 1. **CoroutineContext 本质是一个“特殊的 Map”**
  `CoroutineContext` 是一个类似 `Map` 的集合，每个元素都有一个唯一的 `Key`。而所有调度器（`Dispatchers.IO`、`Main`、`Main.immediate`）共享同一个 Key —— `ContinuationInterceptor`。所以调度器会被后指定的覆盖。
 
-##### 3.2.1.2 **launch 内部的“加法”合并**
+##### 2. **launch 内部的“加法”合并**
  当你调用  launch  时，第一步合并上下文（实际执行了 Kotlin 中重载的  +  运算符），所以合并过程等价于：
 
 ```kotlin
@@ -162,7 +162,7 @@ val newContext = (SupervisorJob() + Dispatchers.Main.immediate) + Dispatchers.Ma
 
 当执行 `+` 操作时：如果右边的元素和左边的元素拥有相同的 `Key`，**右边直接替换掉左边**。因此 `Main.immediate` 被 `Main` 覆盖，最终上下文变成 `SupervisorJob() + Dispatchers.Main`。
 
-##### 3.2.1.3 其底层数据结构`CombinedContext`
+##### 3. 其底层数据结构`CombinedContext`
 协程上下文并非使用 `HashMap`，而是用了一种**不可变链表结构，**在协程底层，如果有多个上下文元素组合在一起，它们会被包装成一个  CombinedContext  节点。
 
   这个节点只有两个属性， 这其实就是一个**二叉树（或者说链表）节点**                            
@@ -258,7 +258,7 @@ CombinedContext(
 
 
 
-#### 3.2.2 步骤二：创建协程对象
+#### 2.2.2 步骤二：创建协程对象
 ```kotlin
 public fun CoroutineScope.launch(
     context: CoroutineContext = EmptyCoroutineContext,
@@ -278,7 +278,7 @@ public fun CoroutineScope.launch(
 
 
 
-##### 3.2.2.1 **start  参数 作用是？**
+##### 1. **start  参数 作用是？**
 >  共有四种模式
 >  •  DEFAULT ** (默认)**：立即调度执行。                                                                                                                     
 >   •  LAZY ** (懒汉式)**：创建后不立刻调度，直到你显式调用  start()  或  join() ，或者协程的结果被需要时才开始。                      
@@ -287,7 +287,7 @@ public fun CoroutineScope.launch(
 
 
 
-##### 3.2.2.2 **StandaloneCoroutine  是什么？**
+##### 2. **StandaloneCoroutine  是什么？**
 ```kotlin
 internal open class **StandaloneCoroutine**(                                                                                                             
         parentContext: CoroutineContext,                                                                                                                 
@@ -312,7 +312,7 @@ internal open class **StandaloneCoroutine**(
 
 
 
-##### 3.2.2.3 **关键动作 —— 认父作父：**
+##### 3. **关键动作 —— 认父作父：**
 注意看  StandaloneCoroutine  继承  AbstractCoroutine  时传入的参数： initParentJob = true ，这行代码在初始化时，触发了一个非常关键的动作：**认父作父，建立树形结构。**   
 
   在  AbstractCoroutine  的初始化块中，会调用  initParentJob()  方法， 这一步在对象创建瞬间就建立了结构化并发的基石。
@@ -339,7 +339,7 @@ internal open class **StandaloneCoroutine**(
 
 
 
-##### 3.2.2.4 **为什么要区分 Lazy 和 非 Lazy？**
+##### 4. **为什么要区分 Lazy 和 非 Lazy？**
  回头看  if  分支里的  LazyStandaloneCoroutine ：    
 
 ```kotlin
@@ -359,7 +359,7 @@ internal class **LazyStandaloneCoroutine**(
 
 
 
-##### 3.2.2.5 总结
+##### 5. 总结
 当  launch  执行到第二步时，它实际上是在搭建基础设施
 
 a.根据你指定的启动模式，决定实例化哪个具体的实现类（通常是  StandaloneCoroutine )
@@ -374,7 +374,7 @@ d.确定了初始的活跃状态（ active ）。                               
 
 
 
-#### 3.2.3 步骤三：启动协程
+#### 2.2.3 步骤三：启动协程
 我们进入  launch  流程的最后一步，也是最神奇的一步：**启动协程**，源码迎来了最后两行
 
 ```kotlin
@@ -394,7 +394,7 @@ public fun CoroutineScope.launch(
 
 
 
-##### 3.2.3.1 **进入  start  方法，分发启动策略**
+##### 1. **进入  start  方法，分发启动策略**
 start方法三个参数
 
 > 1. start : 启动模式（默认是  CoroutineStart.DEFAULT ）。                                                                                    
@@ -425,7 +425,7 @@ CoroutineStart  枚举本身是一个巧妙的机制，它重载了  invoke  操
 
 
 
-##### 3.2.3.2 **startCoroutineCancellable  —— 包装成 DispatchedContinuation**
+##### 2. **startCoroutineCancellable  —— 包装成 DispatchedContinuation**
 这一步非常底层，进入了 Kotlin 编译器的领域。    
 ```kotlin
 // Cancellable.kt                                                                                                                          
@@ -459,7 +459,7 @@ createCoroutineUnintercepted() ：**目的：把你写的 ** { ... } ** 代码�
 
   
 
-1. **.intercepted()  (调度器的拦截)**  
+2. **.intercepted()  (调度器的拦截)**  
 
 **目的：给这个原始的代码块套上一层“调度器外衣”，决定它要在哪里执行。 具体就是intercepted()  会去协程上下文中寻找  ContinuationInterceptor，找到调度器后，会用一个叫  DispatchedContinuation  的壳，把刚才的状态机包装起来**
 
@@ -518,7 +518,7 @@ createCoroutineUnintercepted() ：**目的：把你写的 ** { ... } ** 代码�
 
     
 
-##### 3.2.3.3 **调度器接管，进入消息队列 (Dispatch)**
+##### 3. **调度器接管，进入消息队列 (Dispatch)**
 ** .resumeCancellableWith(...)  (扣动扳机)**  ，对包装好的  DispatchedContinuation  发起第一次启动信号。意思是：“一切准备就绪，开始执行吧！”。 进入  resumeCancellableWith  后， DispatchedContinuation  知道该干活了
 
 ```kotlin
@@ -580,7 +580,7 @@ override fun isDispatchNeeded(context: CoroutineContext): Boolean {
 
 
 ## 三、拓展点
-### 4.1 状态机如何生成：CPS 变换
+### 3.1 状态机如何生成：CPS 变换
 上面提到我们编写的花括号里的代码，Kotlin 编译器会将其编译成一个继承自 `SuspendLambda` 状态机，那如何生成状态机？继续深入讨论下这里。上述编译过程，叫做 CPS 变换，Continuation-Passing Style）
 
 假设我们有这样一段代码，里面有两个挂起点（ delay ）：
@@ -729,7 +729,7 @@ final class MyCoroutineStateMachine extends SuspendLambda implements Function2 {
 
 
 
-### 4.2 挂起与恢复的本质：`delay` 与 `resumeWith`
+### 3.2 挂起与恢复的本质：`delay` 与 `resumeWith`
 当我们在协程中调用  delay(1000)  时，它底层是如何计时，又是如何唤醒协程的呢？
 
 首先要明确， delay  **绝对不是**调用  Thread.sleep(1000) 。如果它 sleep 了，主线程就会卡死 1 秒。                                                
@@ -800,7 +800,7 @@ final class MyCoroutineStateMachine extends SuspendLambda implements Function2 {
 
 
 
-### 4.3 LifeCycle销毁时，协程是如何自动取消？
+### 3.3 LifeCycle销毁时，协程是如何自动取消？
 文章最开始提到，`LifecycleCoroutineScopeImpl` 实现了 `LifecycleEventObserver` 接口：
 
 ```kotlin
@@ -842,7 +842,7 @@ private fun notifyCancelling(list: NodeList, cause: Throwable) {
 
 
 
-### 4.4 **什么是结构化并发（Structured Concurrency）**
+### 3.4 **什么是结构化并发（Structured Concurrency）**
 在 Kotlin 协程中，结构化并发并不是某个单一的类或函数，而是**一套建立在父子 Job 树形结构之上的、约束协程生命周期和异常处理的规则体系。**  
 
 它的核心可以用三句话概括：**生命周期绑定、取消向下传播、异常向上传递。**     
@@ -859,7 +859,7 @@ private fun notifyCancelling(list: NodeList, cause: Throwable) {
 
 
 
-1. **生命周期管理：同生共死，绝不留孤儿**  
+2. **生命周期管理：同生共死，绝不留孤儿**  
 
 结构化并发保证了：**父协程在完成之前，必须等待其所有子协程完成。**
 
@@ -869,7 +869,7 @@ private fun notifyCancelling(list: NodeList, cause: Throwable) {
 
 
 
-1. **异常处理：株连九族与隔离防火墙** 
+3. **异常处理：株连九族与隔离防火墙** 
 
 当并发任务发生崩溃时，结构化并发规定了异常的**递归向上传播**路径。
 
