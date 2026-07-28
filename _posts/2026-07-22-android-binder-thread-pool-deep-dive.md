@@ -5,43 +5,35 @@ categories: [Android开发]
 tags: [Android, Binder, 源码分析, 进程通信]
 ---
 
-## 零、引言
+## 零、从一个问题开始
 
-在 Android 开发中，`bindService` 发起一次跨进程调用，然后在 `onServiceConnected` 里拿到远端对象的代理，接着像调本地方法一样调用它的接口——这是我们最熟悉的 Binder 用法之一。但你是否认真追问过：服务端进程里，到底是谁在执行你的 `onTransact`？那些叫 `Binder:xxx_1`、`Binder:xxx_2` 的线程，是怎么来的？又是什么时候被唤醒的？
+你写下 `mRemoteService.doWork()`，跨进程调用就发生了。但服务端进程里，到底是**谁**在执行 `onTransact`？那些叫 `binder:1234_2`、`binder:1234_3` 的线程从哪来？谁决定它们的数量？没活干的时候它们在做什么？
 
-Binder 线程池源码容易越读越散，原因通常不是某个函数太难，而是一上来就钻进 `ProcessState`、`IPCThreadState`、`binder_proc`、`binder_thread` 这些对象，看到的是结构体和函数，却没有先回答最根本的问题：线程池在哪一层？谁创建线程？谁调度线程？谁决定扩容？
+这些问题的答案，都藏在「Binder 线程池」里。可它的源码偏偏最容易越读越晕——一上来就是 `ProcessState`、`IPCThreadState`、`binder_proc`、`binder_thread` 一堆结构体，函数调函数，读完仍然回答不了最朴素的问题。
 
-本文从一个最朴素的问题出发：**Binder 线程池里的线程，没活干的时候在干什么？** 逐步深入到 App 进程启动时 Binder 线程池如何自动启动、`ProcessState` 如何连接 driver、`IPCThreadState` 如何进入主循环、kernel 如何维护等待队列与分发事务，以及 `BR_SPAWN_LOOPER` 如何触发线程池按需扩容。
+原因是：**Binder 线程池横跨用户态和内核态两个世界，孤立地读任何一边都拼不出全貌。** 所以本文换一种读法——先建立一张跨越两界的地图，再用一次真实调用把它跑通，最后沿着「一个 Binder 线程的一生」把源码逐段验证。
 
-一句话先给结论：**Binder 线程池不是一个普通的“用户态任务队列 + worker 线程”模型，而是“用户态线程睡在 driver 上，kernel 维护等待队列、分发事务、唤醒线程并请求扩容”的协作模型。**
+先把最终结论放这儿，读完全文你会反复回到它：
+
+> **Binder 线程池不是「用户态队列 + worker 线程」那种普通模型。它是一种协作模型：用户态负责创建、运行线程，线程平时睡在内核里；内核 driver 负责记录状态、排队事务、唤醒线程，并在不够用时反过来「请求」用户态扩容。**
 
 ---
 
-## 一、先看结构，而不是先看源码
+## 一、先建立地图：两个半场，一条边界
 
-一句话结论：Binder 线程池 = 用户态创建和运行 Binder looper 线程 + 内核态 binder driver 维护调度状态，双方通过 `ioctl` 上的 `BC_*` / `BR_*` 命令协作。kernel 不创建 `pthread`，只记录状态、分发事务、唤醒线程和请求扩容。
+理解线程池，第一步不是读代码，而是划清一条边界——**谁拥有线程，谁调度线程**。
 
-先回答 4 个最关键的问题：
+| 关注点 | 归属 | 为什么在这一层 |
+| --- | --- | --- |
+| 创建、运行真实线程（`pthread`） | 用户态 libbinder | 线程是进程资源，内核不该替进程创建 |
+| Binder 对象语义、方法分发、Parcel 序列化 | 用户态框架层 | 贴近业务，易扩展 |
+| 事务缓冲、引用计数、死亡通知 | 内核 driver | 需要跨进程一致性 |
+| 等待队列、线程唤醒、事务分发 | 内核 driver | 涉及调度，放内核避免用户态忙轮询 |
+| 线程够不够、要不要扩容 | 内核 driver | 只有 driver 全局可见「有没有空闲线程」 |
 
-| 问题 | 答案 |
-| --- | --- |
-| 谁创建线程？ | 用户态 libbinder。`ProcessState::spawnPooledThread()` 真正调用 `pthread_create` 创建线程。 |
-| 线程跑什么？ | 每个 Binder looper 线程进入 `IPCThreadState::joinThreadPool()`，阻塞在 `ioctl(BINDER_WRITE_READ)` 上等待 driver 返回命令。 |
-| 谁决定把请求分给哪个线程？ | 内核态 binder driver。它维护空闲线程队列 `waiting_threads`，新事务到来时挑一个空闲线程唤醒或放入进程队列。 |
-| 谁决定要扩容？ | kernel driver。当没有空闲线程且未达上限时，driver 返回 `BR_SPAWN_LOOPER`，用户态收到后才创建新线程。 |
+一句话：**用户态出线程，内核出调度。** 普通线程池是「用户态队列 + worker 主动取任务」；Binder 线程池是「worker 睡在内核上，内核直接把活塞给它并唤醒」。正因如此，扩容信号只能由内核**主动下发**，用户态无从自己判断。
 
-6 个核心对象及其职责：
-
-| 层 | 对象 | 是什么 | 核心职责 | 关键字段/方法 |
-| --- | --- | --- | --- | --- |
-| 用户态 | `ProcessState` | 进程级单例 | 打开 `/dev/binder`、设置最大线程数、创建 `PoolThread` | `mDriverFD`、`mMaxThreads`、`startThreadPool()`、`spawnPooledThread()` |
-| 用户态 | `IPCThreadState` | 线程本地单例 | 每个 Binder 线程持有一个，负责和 driver 收发命令、执行 `BR_*` | `mIn/mOut`、`joinThreadPool()`、`talkWithDriver()`、`executeCommand()` |
-| 用户态 | `PoolThread` | libbinder 创建的真实 `pthread` | 线程实体，`threadLoop()` 进入 `joinThreadPool()` | 线程名 `binder:<pid>_<seq>` |
-| 内核态 | `binder_proc` | driver 为每个进程维护的状态 | 管理该进程所有 `binder_thread`、空闲线程队列、进程级 todo、线程计数 | `threads`、`waiting_threads`、`todo`、`max_threads`、`requested_threads_started` |
-| 内核态 | `binder_thread` | driver 为每个 Binder looper 维护的影子状态 | 对应用户态一个真实线程，记录 looper 状态、事务栈、线程私有 todo | `looper`、`transaction_stack`、`todo`、`wait` |
-| 内核态 | `binder_transaction` | 一次跨进程调用 | 真正在队列中排队和分发的工作单元 | 经由 `binder_work` 挂入 `thread.todo` 或 `proc.todo` |
-
-整体关系图：
+带着这条边界，看这张全景图——后面所有源码，都只是在把它落地：
 
 ```text
                           ┌─────────────────────────────────────────┐
@@ -92,99 +84,110 @@ Binder 线程池源码容易越读越散，原因通常不是某个函数太难�
                           └─────────────────────────────────────────┘
 ```
 
-记住这张图，后续所有代码只是在把上述关系落地。`ProcessState` 解决“进程怎么连 driver、怎么创建线程”，`IPCThreadState` 解决“线程怎么成为 looper、怎么收发命令”，`binder_proc` / `binder_thread` 解决“driver 怎么选线程、怎么排队、怎么唤醒”，`BR_SPAWN_LOOPER` 解决“什么时候扩容”。
+图里的 6 个角色，各司其职：
+
+| 层 | 角色 | 一句话职责 |
+| --- | --- | --- |
+| 用户态 | `ProcessState` | 进程级单例：连 driver、设线程上限、创建 `PoolThread` |
+| 用户态 | `IPCThreadState` | 线程本地单例：和 driver 收发命令、执行 `BR_*` |
+| 用户态 | `PoolThread` | libbinder 创建的真实 `pthread`，线程体就是进 looper 循环 |
+| 内核态 | `binder_proc` | 进程的调度台账：线程表、空闲队列、待办队列、线程计数 |
+| 内核态 | `binder_thread` | 用户态线程在内核里的「影子」，记录 looper 状态和私有待办 |
+| 内核态 | `binder_transaction` | 一次跨进程调用，真正在队列里排队、被分发的工作单元 |
+
+四个总纲问题，先记住答案，后面逐一验证：
+
+| 问题 | 答案 |
+| --- | --- |
+| 谁创建线程？ | 用户态 libbinder，最终落到 `pthread_create` |
+| 线程平时在干嘛？ | 睡在内核 `waiting_threads` 里，阻塞在 `ioctl` 上 |
+| 谁把请求分给哪个线程？ | 内核 driver，从空闲队列挑一个唤醒 |
+| 谁决定扩容？ | 内核 driver，不够用时返回 `BR_SPAWN_LOOPER` |
 
 ---
 
-### 这套机制为什么会这样设计？
+## 二、先跑通一次调用：把地图变成电影
 
-一句话结论：Binder 把“对象调用语义”放在用户态，把“事务分发与并发调度”放在 kernel，线程池正是这个分工的产物。
+结构图是静态的，现在让它动起来。假设你的 App（client）已经拿到远端服务的代理，发起一次**同步**调用 `service.doWork()`，服务端进程此刻恰好有空闲的 Binder 线程。整个过程是这样的：
 
-| 关注点 | 谁负责 | 为什么放在这一层 |
-| --- | --- | --- |
-| Binder 对象语义、方法调用、Parcel 序列化 | 用户态 libbinder / 框架层 | 贴近业务逻辑，易于扩展 |
-| 真实线程的创建和执行 | 用户态 libbinder | `pthread` 是进程资源，kernel 不应替进程创建线程 |
-| 事务缓冲、引用计数、死亡通知 | kernel driver | 需要跨进程一致性保证 |
-| 等待队列、线程唤醒、分发决策 | kernel driver | 涉及调度，放在内核可避免用户态忙轮询和竞争 |
-| 何时需要更多线程 | kernel driver | driver 全局掌握“有没有空闲线程、队列是否为空” |
+```text
+Client 线程                     Binder Driver                Server Binder 线程
+─────────────                   ─────────────                ──────────────────
+doWork()
+  └► BC_TRANSACTION ─────────►
+                                ① binder_transaction()
+                                   找到目标进程，分配 buffer，拷贝参数
+                                ② binder_proc_transaction()
+                                   从 waiting_threads 挑一个空闲线程
+                                ③ 把 work 塞进该线程的 todo，唤醒它 ──►
+                                                            ④ 从睡眠中醒来
+                                                               读到 BR_TRANSACTION
+                                                            ⑤ 包装成 Parcel
+                                                               onTransact() 真正干活
+                                                            ⑥ BC_REPLY ──►
+                                ⑦ 把 reply 投给等待的 client 线程
+  ◄──────── BR_REPLY ───────────
+doWork() 返回
+```
 
-普通线程池是“用户态队列 + 用户态 worker 取任务”；Binder 线程池是“用户态 worker 睡在内核上 + kernel 直接唤醒/分发”。这决定了扩容信号必须从 driver 来，而不是用户态自己轮询判断。
+七步里，藏着这篇文章要讲清的全部机制：
+
+- **① 事务从哪来** → client 线程通过 `BC_TRANSACTION` 把调用交给 driver（第四章：通信通道）；
+- **② 挑哪个线程** → driver 从 `waiting_threads` 选空闲线程（第五、七章：调度台账与分发）；
+- **③④ 线程怎么醒的** → 它本来就睡在内核等待队列上（第六章：待命）；
+- **⑤ 谁执行 onTransact** → 被唤醒的那个 Binder looper（第八章：执行）；
+- **如果第②步没有空闲线程呢** → 事务进 `proc.todo` 排队，同时可能触发 `BR_SPAWN_LOOPER` 扩容（第九章）。
+
+而这些线程本身是怎么来的——第一个由进程启动时创建（第三章），后续由内核按需请求扩容（第九章）。下面就沿着「一个 Binder 线程的一生」，把每一步落到源码。
 
 ---
 
-## 二、从进程启动到第一个 Binder 线程
+## 三、诞生：进程启动时的第一个线程
 
-一句话结论：普通 App 进程在 zygote fork 后的 native 初始化阶段自动启动 Binder 线程池——先打开 `/dev/binder` 建立连接、设置最大线程数、`mmap` 事务缓冲区，然后主动创建 1 个主 `PoolThread`。
+一句话结论：普通 App 进程在 zygote fork 出来后的 native 初始化阶段，就自动启动了 Binder 线程池——连上 driver、设好上限、映射缓冲区，再主动创建**第一个**线程。
 
-两条典型启动路径：
-
-| 进程类型 | 启动方式 | 说明 |
-| --- | --- | --- |
-| App 进程 | zygote child 自动触发 | `ZygoteInit → nativeZygoteInit → onZygoteInit → ProcessState::self()->startThreadPool()` |
-| Native service | 进程自己显式调用 | `ProcessState::self()->startThreadPool(); IPCThreadState::self()->joinThreadPool();` 通常让主线程也成为 Binder looper |
-
-App 进程链路起点：
+App 进程不需要自己写任何代码，这一切发生在 `ZygoteInit` 的启动链路里：
 
 ```java
 // frameworks/base/core/java/com/android/internal/os/ZygoteInit.java
 public static Runnable zygoteInit(...) {
     ...
-    ZygoteInit.nativeZygoteInit();   // 进入 native 初始化
+    ZygoteInit.nativeZygoteInit();   // 经 JNI 进入 native
     return RuntimeInit.applicationInit(...);
 }
 ```
 
-`nativeZygoteInit()` 经过 JNI 进入 `app_main.cpp` 中的 `AppRuntime::onZygoteInit()`：
-
 ```cpp
 // frameworks/base/cmds/app_process/app_main.cpp
 virtual void onZygoteInit() {
-    sp<ProcessState> proc = ProcessState::self();
-    proc->startThreadPool();
+    sp<ProcessState> proc = ProcessState::self();  // 第一步：接入 driver
+    proc->startThreadPool();                       // 第二步：创建第一个线程
 }
 ```
 
-这两行做了两件事：`ProcessState::self()` 触发打开 driver；`startThreadPool()` 创建第一个 Binder 线程。
+（Native service 则是自己显式调 `startThreadPool()` + `joinThreadPool()`，通常让主线程也当 looper。原理一致，不再单列。）
 
-### 2.1 连接 driver
-
-`ProcessState::self()` 首次调用时创建单例，构造函数做 3 件事：
-
-源码位置：`frameworks/native/libs/binder/ProcessState.cpp`
+**第一步：接入 driver。** `ProcessState::self()` 首次调用时构造单例，做三件事——打开设备、校验版本、设置进程级参数，最后 `mmap` 出事务缓冲区：
 
 ```cpp
-#define DEFAULT_MAX_BINDER_THREADS 15                        // lazy 线程上限默认值
-#define BINDER_VM_SIZE ((1*1024*1024) - sysconf(_SC_PAGE_SIZE)*2)  // 事务缓冲区 ~1MB - 2页
+// frameworks/native/libs/binder/ProcessState.cpp
+#define DEFAULT_MAX_BINDER_THREADS 15                             // lazy 线程上限默认值
+#define BINDER_VM_SIZE ((1*1024*1024) - sysconf(_SC_PAGE_SIZE)*2) // 事务缓冲区 ~1MB - 2页
 
 static unique_fd open_driver(const char* driver, String8* error) {
-    auto fd = unique_fd(open(driver, O_RDWR | O_CLOEXEC));
-    ioctl(fd.get(), BINDER_VERSION, &vers);                 // 校验协议版本
+    auto fd = unique_fd(open(driver, O_RDWR | O_CLOEXEC));       // 打开 /dev/binder
+    ioctl(fd.get(), BINDER_VERSION, &vers);                     // 校验协议版本
     size_t maxThreads = DEFAULT_MAX_BINDER_THREADS;
-    ioctl(fd.get(), BINDER_SET_MAX_THREADS, &maxThreads);   // 告诉 driver lazy 上限 15
+    ioctl(fd.get(), BINDER_SET_MAX_THREADS, &maxThreads);       // 告诉 driver：lazy 上限 15
     uint32_t enable = DEFAULT_ENABLE_ONEWAY_SPAM_DETECTION;
     ioctl(fd.get(), BINDER_ENABLE_ONEWAY_SPAM_DETECTION, &enable);
     return fd;
 }
 ```
 
-构造函数流程：
+注意这一步**还没有任何 Binder 线程**——它只是「把进程接入 driver」。真正的服务线程要等下一步。
 
-```text
-ProcessState::ProcessState("/dev/binder")
-  -> open_driver()
-      -> open("/dev/binder")                        // 获取 fd
-      -> ioctl(BINDER_VERSION)                      // 版本校验
-      -> ioctl(BINDER_SET_MAX_THREADS, 15)          // 设置 lazy 线程上限
-      -> ioctl(BINDER_ENABLE_ONEWAY_SPAM_DETECTION) // 开启 oneway 限流检测
-  -> mmap(BINDER_VM_SIZE)                           // 映射事务接收缓冲区
-  -> 保存 mDriverFD / mVMStart
-```
-
-这一步只建立连接、设置进程级参数、映射缓冲区，还没有创建任何 Binder 线程。也就是说，`ProcessState::self()` 更像是“把当前进程接入 Binder driver”，真正的服务线程要等 `startThreadPool()` 才会出现。
-
-### 2.2 创建第一个线程
-
-`startThreadPool()` 只做一件事：创建 1 个 `isMain=true` 的主 `PoolThread`。
+**第二步：创建第一个线程。** `startThreadPool()` 只做一件事：创建 1 个 `isMain=true` 的主 `PoolThread`：
 
 ```cpp
 void ProcessState::startThreadPool() {
@@ -194,22 +197,18 @@ void ProcessState::startThreadPool() {
         spawnPooledThread(true);    // isMain=true
     }
 }
-```
 
-`spawnPooledThread()` 真正创建 `pthread`：
-
-```cpp
 void ProcessState::spawnPooledThread(bool isMain) {
     if (mThreadPoolStarted) {
         String8 name = makeBinderThreadName();   // 形如 binder:<pid>_<seq>
         sp<Thread> t = sp<PoolThread>::make(isMain);
-        t->run(name.c_str());                    // 启动新 pthread
+        t->run(name.c_str());                    // 这里才真正 pthread_create
         mKernelStartedThreads++;
     }
 }
 ```
 
-`PoolThread` 的线程体只有一行：
+`PoolThread` 的线程体只有一行——一头扎进 looper 主循环，从此这个线程的余生都在里面（下一章）：
 
 ```cpp
 class PoolThread : public Thread {
@@ -220,78 +219,58 @@ class PoolThread : public Thread {
 };
 ```
 
-从进程启动到第一个 Binder 线程就绪的完整链路：
+至此，「第一个 Binder 线程」的完整出生链路：
 
 ```text
 ZygoteInit.zygoteInit()
-  -> nativeZygoteInit()
-  -> AppRuntime::onZygoteInit()
-  -> ProcessState::self()
-       -> open("/dev/binder")
-       -> ioctl(BINDER_SET_MAX_THREADS, 15)
-       -> mmap() 事务缓冲区
-  -> startThreadPool()
-       -> spawnPooledThread(true)         // 创建主 PoolThread（pthread）
-       -> PoolThread.threadLoop()
-       -> IPCThreadState.joinThreadPool(true)   // -> 进入下一章讲的 looper 主循环
+  └► nativeZygoteInit() → onZygoteInit()
+       └► ProcessState::self()          // open + BINDER_SET_MAX_THREADS + mmap
+       └► startThreadPool()
+            └► spawnPooledThread(true)         // pthread_create
+                 └► joinThreadPool(true)       // 进入主循环，见下一章
 ```
 
-后续线程不是预先创建，而是 driver 在需要时返回 `BR_SPAWN_LOOPER` 按需扩容。
+**记住一个关键点：** 进程启动只创建这**一个**线程。后面即使并发请求暴涨，也不是预先铺一堆线程等着，而是内核发现忙不过来时才逐个「请求」扩容（第九章）。这正是 Binder 线程池「按需伸缩」的核心特征。
 
 ---
 
-## 三、Binder looper 主循环：joinThreadPool
+## 四、报到与通话：成为 looper，接通 BINDER_WRITE_READ
 
-一句话结论：每个 Binder 线程进入 `joinThreadPool()` 后，先向 driver 注册自己是 looper，然后循环调用 `talkWithDriver()` 阻塞等待命令、`executeCommand()` 执行命令，直到连接断开才退出。
-
-源码位置：`frameworks/native/libs/binder/IPCThreadState.cpp`
+线程出生后进入 `joinThreadPool()`。它做的第一件事是**向 driver 报到**——声明「我是一个 Binder looper，可以接活了」，然后进入「等命令 → 执行命令」的无限循环：
 
 ```cpp
+// frameworks/native/libs/binder/IPCThreadState.cpp
 void IPCThreadState::joinThreadPool(bool isMain) {
     mProcess->mCurrentThreads++;
-    mOut.writeInt32(isMain ? BC_ENTER_LOOPER : BC_REGISTER_LOOPER);  // 注册 looper
+    mOut.writeInt32(isMain ? BC_ENTER_LOOPER : BC_REGISTER_LOOPER);  // 报到
     mIsLooper = true;
 
     status_t result;
     do {
         processPendingDerefs();
-        result = getAndExecuteCommand();       // 取命令并执行
+        result = getAndExecuteCommand();       // 阻塞取命令 + 执行
         if (result == TIMED_OUT && !isMain) {
             break;                             // 非主线程超时可退出
         }
     } while (result != -ECONNREFUSED && result != -EBADF);
 
-    mOut.writeInt32(BC_EXIT_LOOPER);           // 退出前通知 driver
+    mOut.writeInt32(BC_EXIT_LOOPER);           // 退场前跟 driver 打招呼
     mIsLooper = false;
     talkWithDriver(false);
     mProcess->mCurrentThreads.fetch_sub(1);
 }
 ```
 
-两种 looper 注册命令的区别：
+报到用两种命令，区别只在于这个 looper 是「自愿加入」还是「被内核请求来的」——这个区别在第九章的扩容里很关键：
 
-| 命令 | 谁发的 | 含义 |
+| 报到命令 | 谁发的 | 潜台词 |
 | --- | --- | --- |
-| `BC_ENTER_LOOPER` | `startThreadPool()` 主动创建的主线程（`isMain=true`），或主动调用 `joinThreadPool()` 的线程 | “我主动成为 Binder looper” |
-| `BC_REGISTER_LOOPER` | `BR_SPAWN_LOOPER` 触发创建的 lazy 线程（`isMain=false`） | “我是应 driver 请求创建的新 looper，来报到” |
+| `BC_ENTER_LOOPER` | 主线程（`isMain=true`）或主动 `joinThreadPool()` 的线程 | 「我主动来当 looper」 |
+| `BC_REGISTER_LOOPER` | 被 `BR_SPAWN_LOOPER` 请求创建的 lazy 线程（`isMain=false`） | 「我是应召扩容来报到的」 |
 
-主循环的核心是 `getAndExecuteCommand()`，它内部是：
+循环的核心 `getAndExecuteCommand()` 内部就两步：`talkWithDriver()`（阻塞等 `BR_*`）+ `executeCommand()`（执行）。而 `talkWithDriver()` 就是用户态和内核之间**唯一的通话通道**：
 
-```text
-getAndExecuteCommand()
-  -> talkWithDriver()     // 阻塞在 ioctl 上，等待 driver 返回 BR_* 命令
-  -> executeCommand()     // 执行返回的命令
-```
-
-Binder 服务线程的运行状态可以简化为：先注册成 looper，然后不断从 driver 读取 `BR_*` 命令并执行。
-
----
-
-## 四、用户态和 driver 的通信通道：BINDER_WRITE_READ
-
-一句话结论：用户态和 kernel 之间通过单一 ioctl `BINDER_WRITE_READ` 双向交换命令——`write_buffer` 放用户态发给 driver 的 `BC_*`，`read_buffer` 放 driver 返回给用户态的 `BR_*`，`talkWithDriver()` 就是这个通道的封装。
-
-`talkWithDriver()` 构造 `binder_write_read` 结构体并发起 ioctl：
+一句话结论：一切收发都走同一个 ioctl —— `BINDER_WRITE_READ`。`write_buffer` 装用户态发给 driver 的 `BC_*`，`read_buffer` 装 driver 返回的 `BR_*`，一次调用可同时读写。
 
 ```cpp
 status_t IPCThreadState::talkWithDriver(bool doReceive) {
@@ -301,103 +280,89 @@ status_t IPCThreadState::talkWithDriver(bool doReceive) {
     const size_t outAvail = (!doReceive || needRead) ? mOut.dataSize() : 0;
 
     bwr.write_size = outAvail;
-    bwr.write_buffer = (uintptr_t)mOut.data();     // 用户态 -> driver 的 BC_* 命令
+    bwr.write_buffer = (uintptr_t)mOut.data();     // 用户态 -> driver：BC_*
 
     if (doReceive && needRead) {
         bwr.read_size = mIn.dataCapacity();
-        bwr.read_buffer = (uintptr_t)mIn.data();   // driver -> 用户态的 BR_* 命令
+        bwr.read_buffer = (uintptr_t)mIn.data();   // driver -> 用户态：BR_*
     } else {
         bwr.read_size = 0;
         bwr.read_buffer = 0;
     }
 
-    ioctl(mProcess->mDriverFD, BINDER_WRITE_READ, &bwr);
+    ioctl(mProcess->mDriverFD, BINDER_WRITE_READ, &bwr);   // ← 线程就阻塞在这
 }
 ```
 
-这里有三个细节值得停一下：
+关于这个通道，三点最容易被忽略：
 
-1. **一次 ioctl 可以既写又读。** `mOut` 里的 `BC_*` 命令会通过 `write_buffer` 提交给 driver，driver 返回的 `BR_*` 命令会被写入 `read_buffer`。
-2. **`joinThreadPool()` 的阻塞点就在这里。** 当 `doReceive=true` 且当前没有可读命令时，线程会睡在 `BINDER_WRITE_READ` 对应的内核等待路径上。
-3. **`BR_SPAWN_LOOPER` 也是从这里回来的。** 扩容不是通过某个单独通知通道发生的，而是 driver 在 read buffer 里返回一条普通的 `BR_*` 命令。
+1. **一次 ioctl 既写又读。** 发出去的 `BC_*` 和收回来的 `BR_*` 在同一次系统调用里完成。
+2. **线程的「睡眠点」就在这行 `ioctl`。** 当没有可读命令时，线程不会返回用户态空转，而是直接睡在内核等待路径上（下一章）。
+3. **扩容信号 `BR_SPAWN_LOOPER` 没有专用通道**，它就是 driver 在 `read_buffer` 里塞回来的一条普通 `BR_*`。
 
-关键命令一览：
+一张表记住这套「协作语言」：
 
 | 命令 | 方向 | 含义 |
 | --- | --- | --- |
-| `BC_ENTER_LOOPER` | 用户态 -> driver | 当前线程主动成为 Binder looper |
-| `BC_REGISTER_LOOPER` | 用户态 -> driver | 新 lazy thread 响应扩容请求并注册 |
-| `BC_TRANSACTION` | 用户态 -> driver | 发起一次 Binder 调用 |
-| `BC_REPLY` | 用户态 -> driver | 返回同步调用结果 |
-| `BC_EXIT_LOOPER` | 用户态 -> driver | 当前线程退出 Binder looper |
-| `BR_TRANSACTION` | driver -> 用户态 | 有 Binder 调用需要当前线程执行 |
-| `BR_REPLY` | driver -> 用户态 | 当前线程等待的同步调用结果返回 |
-| `BR_SPAWN_LOOPER` | driver -> 用户态 | 请求用户态创建新 Binder 线程 |
-
-Binder looper 本质是睡在 ioctl 上的服务线程——没有请求时阻塞在内核等待队列中，不消耗 CPU；有请求时 driver 直接把 `BR_TRANSACTION` 写回 read buffer 并唤醒线程。
+| `BC_ENTER_LOOPER` / `BC_REGISTER_LOOPER` | 用户态 → driver | 报到成 looper（主动 / 应召） |
+| `BC_TRANSACTION` / `BC_REPLY` | 用户态 → driver | 发起调用 / 返回同步结果 |
+| `BC_EXIT_LOOPER` | 用户态 → driver | 退出 looper |
+| `BR_TRANSACTION` | driver → 用户态 | 有活，你来执行 |
+| `BR_REPLY` | driver → 用户态 | 你等的同步结果回来了 |
+| `BR_SPAWN_LOOPER` | driver → 用户态 | 忙不过来了，再造一个线程 |
 
 ---
 
-## 五、driver 侧如何管理进程和线程
+## 五、内核的账本：binder_proc 与 binder_thread
 
-一句话结论：driver 为每个打开 `/dev/binder` 的进程维护一个 `binder_proc`，为每个调用过 binder ioctl 的线程维护一个 `binder_thread`。`binder_thread` 不是内核线程，而是用户态真实 `pthread` 在 driver 中的影子状态。
-
-源码位置：`kernel/common/drivers/android/binder_internal.h`
-
-`binder_proc`——进程维度的调度台账：
+线程报到后，内核给它记了一笔账。要看懂调度，得先认识 driver 的两个核心结构——它们是前面全景图里「内核半场」的实体。
 
 ```c
+// kernel/common/drivers/android/binder_internal.h
+
+// 进程维度：driver 为每个打开 /dev/binder 的进程建一个
 struct binder_proc {
-    struct rb_root threads;              // 该进程所有 binder_thread（红黑树）
-    struct rb_root nodes;                // 本地 Binder 实体
-    struct rb_root refs_by_desc;         // 远端 Binder 引用（按 handle 查找）
-    struct list_head waiting_threads;    // 空闲可接活的 looper 线程链表
-    struct list_head todo;               // 进程级工作队列
-    u32 max_threads;                     // lazy 线程上限（对应 BINDER_SET_MAX_THREADS）
-    int requested_threads;               // 已请求但未注册的线程数
-    int requested_threads_started;       // 已按请求启动并注册的 lazy 线程数
+    struct rb_root threads;              // 本进程所有 binder_thread
+    struct list_head waiting_threads;    // ★ 空闲、可接活的 looper 队列
+    struct list_head todo;               // ★ 进程级待办（没指定线程时的暂存）
+    u32 max_threads;                     // lazy 线程上限（= BINDER_SET_MAX_THREADS）
+    int requested_threads;               // 已请求、但还没报到的线程数
+    int requested_threads_started;       // 已应召启动并报到的 lazy 线程数
     struct binder_alloc alloc;           // 事务缓冲区分配器
     spinlock_t inner_lock, outer_lock;
 };
-```
 
-`binder_thread`——线程维度的状态卡：
-
-```c
+// 线程维度：driver 为每个调过 binder ioctl 的线程建一个——它是用户态 pthread 的「影子」
 struct binder_thread {
-    struct binder_proc *proc;            // 所属进程
-    struct list_head waiting_thread_node;// 挂入 proc->waiting_threads 的节点
-    int pid;                             // 线程 tid
-    int looper;                          // looper 状态：ENTERED/REGISTERED/WAITING/EXITED
-    struct binder_transaction *transaction_stack;  // 同步调用栈（处理嵌套和 reply 投递）
-    struct list_head todo;               // 线程私有工作队列
-    bool process_todo;
-    wait_queue_head_t wait;              // 线程睡眠等待 work 的等待队列
+    struct binder_proc *proc;                      // 所属进程
+    struct list_head waiting_thread_node;          // 挂进 proc->waiting_threads 的节点
+    int looper;                                    // 状态位：ENTERED/REGISTERED/WAITING/EXITED
+    struct binder_transaction *transaction_stack;  // 同步调用栈（处理嵌套与 reply 回投）
+    struct list_head todo;                         // ★ 线程私有待办（只有它能处理）
+    wait_queue_head_t wait;                        // ★ 线程睡眠等待的队列
 };
 ```
 
-关键字段速查：
+关键一点：**`binder_thread` 不是内核线程**，它只是用户态那个真实 `pthread` 在内核里的状态卡。真正跑代码的永远是用户态线程，内核只是拿这张卡记录「它现在是空闲还是在忙、它的待办里有什么」。
 
-| 字段 | 所在结构 | 作用 |
+带 ★ 的五个字段，是后面两章调度的全部主角：
+
+| 字段 | 位置 | 作用 |
 | --- | --- | --- |
-| `waiting_threads` | `binder_proc` | 当前空闲、可接新事务的 looper 列表，也是 driver 选择服务线程的依据 |
-| `todo`（proc） | `binder_proc` | 进程级工作队列，没有选中具体线程时 work 先放这里 |
-| `todo`（thread） | `binder_thread` | 线程私有工作队列，必须由该线程处理 |
-| `max_threads` | `binder_proc` | lazy 线程上限 |
-| `requested_threads_started` | `binder_proc` | 已创建的 lazy 线程数 |
-| `transaction_stack` | `binder_thread` | 同步调用栈，嵌套 Binder 调用和 reply 回投都靠它 |
-| `looper` | `binder_thread` | 当前线程的 looper 状态位 |
-| `wait` | `binder_thread` | 线程阻塞等待 work 的 wait queue |
+| `waiting_threads` | proc | 空闲 looper 列表，driver 选线程的唯一来源 |
+| `todo`（proc / thread） | proc / thread | 进程公共待办 vs 线程私有待办 |
+| `max_threads` / `requested_threads_started` | proc | lazy 上限 / 已创建的 lazy 线程数 |
+| `transaction_stack` | thread | 同步调用栈，嵌套调用和 reply 回投靠它 |
+| `wait` | thread | 线程睡在这个等待队列上 |
 
 ---
 
-## 六、线程没任务时如何等待
+## 六、待命：没活干时，线程睡在哪
 
-一句话结论：Binder looper 没有 work 时进入 `binder_wait_for_work()`，可处理进程级 work 的线程先把自己挂入 `waiting_threads`，然后 `schedule()` 睡眠；有 work 时被唤醒，从链表中摘除，继续取任务。
-
-源码位置：`kernel/common/drivers/android/binder.c`
+一句话结论：looper 没活时进入 `binder_wait_for_work()`——先把自己挂进 `waiting_threads`（宣告「我空闲可接活」），再 `schedule()` 真正睡进内核；有活时被唤醒、出队、继续干。
 
 ```c
+// kernel/common/drivers/android/binder.c
 static int binder_wait_for_work(struct binder_thread *thread, bool do_proc_work) {
     DEFINE_WAIT(wait);
     struct binder_proc *proc = thread->proc;
@@ -407,17 +372,14 @@ static int binder_wait_for_work(struct binder_thread *thread, bool do_proc_work)
     for (;;) {
         prepare_to_wait(&thread->wait, &wait, TASK_INTERRUPTIBLE|TASK_FREEZABLE);
         if (binder_has_work_ilocked(thread, do_proc_work))
-            break;
+            break;                                                           // 有活，不睡
         if (do_proc_work)
-            list_add(&thread->waiting_thread_node, &proc->waiting_threads);  // 入空闲队列
+            list_add(&thread->waiting_thread_node, &proc->waiting_threads);  // 宣告空闲
         binder_inner_proc_unlock(proc);
-        schedule();                                                          // 睡眠
+        schedule();                                                          // 睡
         binder_inner_proc_lock(proc);
-        list_del_init(&thread->waiting_thread_node);                         // 被唤醒后出队
-        if (signal_pending(current)) {
-            ret = -EINTR;
-            break;
-        }
+        list_del_init(&thread->waiting_thread_node);                         // 醒来出队
+        if (signal_pending(current)) { ret = -EINTR; break; }
     }
     finish_wait(&thread->wait, &wait);
     binder_inner_proc_unlock(proc);
@@ -425,85 +387,57 @@ static int binder_wait_for_work(struct binder_thread *thread, bool do_proc_work)
 }
 ```
 
-等待/唤醒流程：
-
-```text
-looper 无 work
-  -> 判断是否可处理 proc work（transaction_stack 为空 + thread.todo 为空）
-  -> 是：把自己挂入 proc->waiting_threads
-  -> prepare_to_wait() + schedule() 进入睡眠
-
-被唤醒后
-  -> 从 waiting_threads 摘除自己
-  -> 检查 signal
-  -> 继续 binder_thread_read() 取 work
-```
-
-`waiting_threads` 就是 driver 眼里的“当前可用服务线程列表”。新 transaction 到来时，driver 优先从这里取线程。
-
-小结一下：Binder 线程空闲时不是在用户态轮询，也不是 libbinder 自己维护一个阻塞队列，而是把“我现在可以接活”这个状态登记到 `proc->waiting_threads`，然后真正睡进 kernel。这个设计让 driver 可以在事务到来时直接选择并唤醒目标线程。
+这段是「协作模型」最精彩的一笔：Binder 线程空闲时**不在用户态轮询**，也不靠 libbinder 自己维护什么阻塞队列，而是把「我可以接活」这个状态**登记到内核的 `waiting_threads`**，然后彻底睡下。于是 `waiting_threads` 就成了 driver 眼里那份「当前可用服务线程」名单——事务一来，直接从名单里挑人唤醒，零轮询、零竞争。
 
 ---
 
-## 七、事务如何分发到线程
+## 七、干活（一）：事务如何被分到某个线程
 
-一句话结论：新事务到来时，driver 先从 `waiting_threads` 取一个空闲线程，work 入该线程的 `thread.todo` 并唤醒；没有空闲线程时，work 入 `proc.todo` 等待后续 looper 取走。
-
-driver 处理 `BC_TRANSACTION` 的链路：
+回到第二章那次调用的 ②③ 步。client 发来 `BC_TRANSACTION` 后，driver 的分发路径是：
 
 ```text
 binder_thread_write()
-  -> binder_transaction()              // 找到 target node/proc，分配 buffer，拷贝数据
-  -> binder_proc_transaction()         // 选择目标线程并投递 work
+  └► binder_transaction()        // 找目标 node/proc、分配 buffer、拷贝数据
+       └► binder_proc_transaction()   // 选线程、投递 work
 ```
 
-`binder_proc_transaction()` 中的关键分发逻辑：
+核心决策就在 `binder_proc_transaction()` 里——**有空闲线程就点名派给它，没有就丢进进程公共待办**：
 
 ```c
 if (!thread && !pending_async)
-    thread = binder_select_thread_ilocked(proc);    // 从 waiting_threads 取一个空闲线程
+    thread = binder_select_thread_ilocked(proc);    // 从 waiting_threads 挑一个
 
 if (thread) {
     binder_transaction_priority(thread, t, node);
-    binder_enqueue_thread_work_ilocked(thread, &t->work);   // 入 thread.todo，唤醒
+    binder_enqueue_thread_work_ilocked(thread, &t->work);   // 进 thread.todo，唤醒它
 } else if (!pending_async) {
-    binder_enqueue_work_ilocked(&t->work, &proc->todo);     // 无空闲线程，入 proc.todo
+    binder_enqueue_work_ilocked(&t->work, &proc->todo);     // 没空闲线程 → 进 proc.todo 排队
 }
 ```
 
-`binder_select_thread_ilocked()` 很简单——取链表头部：
+「挑一个」的逻辑简单到就是取链表头：
 
 ```c
 thread = list_first_entry_or_null(&proc->waiting_threads,
                                   struct binder_thread, waiting_thread_node);
 if (thread)
-    list_del_init(&thread->waiting_thread_node);
+    list_del_init(&thread->waiting_thread_node);   // 选中即出队，不再算空闲
 ```
 
-分发规则：
+于是有了两个待办队列，分工明确：
 
-```text
-waiting_threads 有空闲线程？
-  ├─ 是 -> 取出一个线程 -> work 入 thread.todo -> 唤醒该线程
-  └─ 否 -> work 入 proc.todo -> 等某个可处理 proc work 的 looper 来取
-```
+| 队列 | 谁能处理 | 什么时候用它 |
+| --- | --- | --- |
+| `thread.todo` | 只有该线程 | 已点名给某空闲线程的普通同步事务；必须回到特定线程的 reply/错误 |
+| `proc.todo` | 任意空闲 looper | 没有空闲线程时的暂存；异步事务等 |
 
-两个队列的区别：
-
-| 队列 | 位置 | 谁能处理 | 什么情况入队 |
-| --- | --- | --- | --- |
-| `thread.todo` | `binder_thread` | 只能由该线程处理 | 选中空闲线程后的普通同步事务；必须投递给特定线程的 reply/错误通知 |
-| `proc.todo` | `binder_proc` | 任意可处理 proc work 的 looper | 没有空闲线程时新事务暂存；异步事务等 |
-
-注意：`thread.todo` 不只是承载“必须投递给特定线程”的 work。driver 从 `waiting_threads` 选中某个空闲线程后，普通同步 transaction 也会入该线程的 `thread.todo`。
+一个常见误解要澄清：`thread.todo` **不只**装「必须给特定线程」的 work。只要 driver 从 `waiting_threads` 点了某个空闲线程，普通同步事务也会进它的 `thread.todo`——这就是第二章 ②③ 步发生的事。
 
 ---
 
-## 八、服务端如何执行 onTransact
+## 八、干活（二）：执行 onTransact，闭合 reply
 
-一句话结论：被唤醒的 Binder looper 从 `binder_thread_read()` 读到 `BR_TRANSACTION`，`executeCommand()` 将 driver buffer 包装成 `Parcel`，设置调用方 pid/uid，然后进入 `BBinder::transact()` / Java Stub 的 `onTransact()`。
-
-用户态收到 `BR_TRANSACTION` 后的处理：
+被唤醒的线程从内核读回一条 `BR_TRANSACTION`，接下来在用户态做四件事，然后调进业务代码：
 
 ```cpp
 // IPCThreadState::executeCommand()
@@ -511,209 +445,176 @@ case BR_TRANSACTION_SEC_CTX:
 case BR_TRANSACTION: {
     binder_transaction_data_secctx tr_secctx;
     binder_transaction_data& tr = tr_secctx.transaction_data;
-    result = mIn.read(&tr, sizeof(tr));
+    result = mIn.read(&tr, sizeof(tr));            // ① 读出事务描述
 
     Parcel buffer;
-    buffer.ipcSetDataReference(
+    buffer.ipcSetDataReference(                    // ② driver 的 buffer 包成 Parcel（零拷贝）
         reinterpret_cast<const uint8_t*>(tr.data.ptr.buffer),
         tr.data_size,
         reinterpret_cast<const binder_size_t*>(tr.data.ptr.offsets),
         tr.offsets_size / sizeof(binder_size_t), freeBuffer);
 
-    mCallingPid = tr.sender_pid;
-    mCallingUid = tr.sender_euid;
+    mCallingPid = tr.sender_pid;                   // ③ 记下调用方身份
+    mCallingUid = tr.sender_euid;                  //    （getCallingPid/Uid 就靠它）
     mLastTransactionBinderFlags = tr.flags;
 
-    // 后续进入 BBinder::transact() -> Java Stub.onTransact()
+    // ④ 进入 BBinder::transact() → Java 层 Stub.onTransact()
     status_t error = mCallingContext.call(...);
 }
 ```
 
-这一步做了 4 件事：
+`onTransact()` 执行完，服务端写 `BC_REPLY`，driver 沿着当初记下的 `transaction_stack` 把结果**精准投回**当初等待的那个 client 线程，client 读到 `BR_REPLY`，`doWork()` 返回。第二章那张时序图，到这里就完整闭合了。
 
-1. 从 read buffer 读出 `binder_transaction_data`。
-2. 把 driver 分配的事务 buffer 包装成 `Parcel` 对象。
-3. 设置调用方身份（`mCallingPid` / `mCallingUid`）和 binder flags。
-4. 进入本地 Binder 对象的 `transact()`，Java 层最终调到 Stub 的 `onTransact()`。
-
-执行完成后，服务端写入 `BC_REPLY`，driver 将 reply 投递给正在等待的 client 线程，client 读到 `BR_REPLY` 后同步调用返回。
-
-一次同步 Binder 调用的完整闭环：
-
-```text
-Client 线程                     Driver                      Server Binder 线程
-─────────────                   ──────                      ─────────────────
-BC_TRANSACTION ──►
-                                binder_transaction()
-                                binder_proc_transaction()
-                                选线程 / 入 proc.todo
-                                唤醒线程 ──────────────────►
-                                                            BR_TRANSACTION
-                                                            onTransact()
-                                                            BC_REPLY ──►
-                                投递 reply 到等待线程
-◄── BR_REPLY
-transact() 返回
-```
+> 顺带回答一个高频问题：`getCallingPid()`/`getCallingUid()` 为什么可信？因为调用方身份（③）是 driver 在内核里填进 `binder_transaction_data` 的，用户态伪造不了——这是 Binder 权限校验的基石。
 
 ---
 
-## 九、线程池如何扩容
+## 九、扩容：线程池如何按需增援
 
-一句话结论：扩容不是用户态轮询触发，而是 driver 在 `binder_thread_read()` 末尾发现“没有空闲线程 + 没有已请求未注册的线程 + 未达 lazy 上限 + 当前线程是正常 looper”四个条件同时满足时，返回 `BR_SPAWN_LOOPER` 请求用户态创建新线程。
+现在回到第二章那个「如果没有空闲线程」的分支。事务进了 `proc.todo` 排队，但如果请求持续涌来、线程始终不够，光排队不是办法——这时**扩容**登场。
 
-源码位置：`kernel/common/drivers/android/binder.c`，`binder_thread_read()` 末尾：
+一句话结论：扩容不是用户态轮询判断的，而是 driver 在 `binder_thread_read()` 末尾，发现**四个条件同时成立**时，主动返回 `BR_SPAWN_LOOPER` 请求用户态造线程。
 
 ```c
-if (proc->requested_threads == 0 &&                            // 没有已请求未注册的线程
-    list_empty(&thread->proc->waiting_threads) &&              // 没有空闲 looper
-    proc->requested_threads_started < proc->max_threads &&     // 未达 lazy 上限
+// kernel/common/drivers/android/binder.c，binder_thread_read() 末尾
+if (proc->requested_threads == 0 &&                            // ① 没有在途的扩容请求
+    list_empty(&thread->proc->waiting_threads) &&              // ② 当前没有空闲 looper
+    proc->requested_threads_started < proc->max_threads &&     // ③ 没到 lazy 上限
     (thread->looper & (BINDER_LOOPER_STATE_REGISTERED |
-     BINDER_LOOPER_STATE_ENTERED))) {                          // 当前线程是正常 looper
+     BINDER_LOOPER_STATE_ENTERED))) {                          // ④ 当前线程本身是正常 looper
     proc->requested_threads++;
     binder_inner_proc_unlock(proc);
-    if (put_user(BR_SPAWN_LOOPER, (uint32_t __user *)buffer)) // 向用户态写入 BR_SPAWN_LOOPER
+    if (put_user(BR_SPAWN_LOOPER, (uint32_t __user *)buffer))  // 把扩容请求写回用户态
         return -EFAULT;
     binder_stat_br(proc, thread, BR_SPAWN_LOOPER);
 }
 ```
 
-四个条件缺一不可：
+四个条件，缺一不可：
 
-| 条件 | 含义 | 为什么需要 |
-| --- | --- | --- |
-| `requested_threads == 0` | 没有已经请求但还没来注册的线程 | 避免重复请求，同一时刻最多 1 个待注册线程 |
-| `waiting_threads` 为空 | 当前没有空闲 looper | 有空闲线程就不需要扩 |
-| `requested_threads_started < max_threads` | lazy 线程数未达上限 | 受 `BINDER_SET_MAX_THREADS` 限制 |
-| 当前 looper 状态为 `REGISTERED` / `ENTERED` | 当前线程自己是正常 looper | 非 looper 线程（如正在发起调用的 client 线程）不应触发扩容 |
+| 条件 | 为什么需要 |
+| --- | --- |
+| ① `requested_threads == 0` | 同一时刻最多请求 1 个，避免一次性造出一堆 |
+| ② `waiting_threads` 为空 | 还有空闲线程就没必要扩 |
+| ③ `requested_threads_started < max_threads` | 受 `BINDER_SET_MAX_THREADS` 上限约束 |
+| ④ 当前线程是 `REGISTERED`/`ENTERED` | 正在发起调用的 client 线程等「非 looper」不该触发扩容 |
 
-用户态收到 `BR_SPAWN_LOOPER` 后：
+用户态收到后造线程，新线程进 `joinThreadPool(false)` 并用 `BC_REGISTER_LOOPER` 报到（对应第四章的「应召」）：
 
 ```cpp
 // IPCThreadState::executeCommand()
 case BR_SPAWN_LOOPER:
-    mProcess->spawnPooledThread(false);   // isMain=false，创建 lazy thread
+    mProcess->spawnPooledThread(false);   // isMain=false，造一个 lazy 线程
     break;
 ```
 
-新线程进入 `joinThreadPool(false)`，向 driver 写入 `BC_REGISTER_LOOPER` 完成注册：
+内核收到 `BC_REGISTER_LOOPER` 时的处理，正好和 `BC_ENTER_LOOPER` 形成对照——它要**核对并更新计数**，因为这是一次「应召报到」：
 
 ```c
 // kernel 处理 BC_REGISTER_LOOPER
 case BC_REGISTER_LOOPER:
     if (proc->requested_threads == 0) {
-        thread->looper |= BINDER_LOOPER_STATE_INVALID;   // 无请求却来注册 -> 异常
+        thread->looper |= BINDER_LOOPER_STATE_INVALID;   // 没请求你却来了 → 标记异常
     } else {
-        proc->requested_threads--;
-        proc->requested_threads_started++;               // 计入已启动 lazy 线程
+        proc->requested_threads--;                       // 在途请求减一
+        proc->requested_threads_started++;               // 已启动 lazy 计数加一
     }
     thread->looper |= BINDER_LOOPER_STATE_REGISTERED;
     break;
 ```
 
-扩容闭环：
+（相比之下，`BC_ENTER_LOOPER` 是主线程主动加入，内核不碰这两个计数——这就是两种报到命令的本质差异。）
+
+整个扩容闭环：
 
 ```text
-没有空闲 waiting thread
-  -> driver 返回 BR_SPAWN_LOOPER 给某 looper
-  -> 该 looper 调用 spawnPooledThread(false)
-  -> 新 pthread 启动，进入 joinThreadPool(false)
-  -> 新线程发送 BC_REGISTER_LOOPER
-  -> driver: requested_threads--, requested_threads_started++
-  -> 新线程成为正式 Binder looper，可接活
+proc.todo 有活但 waiting_threads 空
+  └► driver 给「当前正在读的这个 looper」返回 BR_SPAWN_LOOPER
+       └► 该 looper 调 spawnPooledThread(false)     // 用户态造 pthread
+            └► 新线程 joinThreadPool(false) → BC_REGISTER_LOOPER 报到
+                 └► driver: requested_threads--, requested_threads_started++
+                      └► 新线程成为正式 looper，投入接活
 ```
 
-kernel 不创建用户态线程，它只发出扩容请求；真正的 `pthread` 创建始终由 libbinder 完成。
+**再强调一遍协作模型：内核从不亲手创建用户态线程，它只发「请求」；真正的 `pthread` 永远由 libbinder 创建。** 这就是为什么线程池能随负载弹性伸缩，又不会把创建线程的权力交给内核。
 
 ---
 
-## 十、最大线程数到底是多少？
+## 十、到底能有多少个 Binder 线程？
 
-一句话结论：15 和 31 是 driver 可请求创建的 lazy 线程上限，不是进程 Binder 线程总数硬上限。
-
-| 进程 | lazy 上限（max_threads） | 常规最大总数口径 |
-| --- | --- | --- |
-| 普通进程默认 | 15 | 1 + 15 = 16 |
-| system_server | 31 | 1 + 31 = 32 |
+一句话结论：`15` 和 `31` 是 driver **可请求创建的 lazy 线程上限**，不是进程 Binder 线程的总数硬顶。
 
 ```cpp
-// ProcessState.cpp
+// ProcessState.cpp —— 普通进程默认
 #define DEFAULT_MAX_BINDER_THREADS 15
 ```
 
 ```java
-// SystemServer.java
+// SystemServer.java —— system_server 抬高上限
 private static final int sMaxBinderThreads = 31;
 BinderInternal.setMaxThreads(sMaxBinderThreads);
 ```
 
-总数口径来自 `ProcessState::getThreadPoolMaxTotalThreadCount()` 的逻辑：
+「总数」要把主线程和手动加入的线程也算进去：
 
 ```text
-1 个 startThreadPool() 主动创建的主 PoolThread
-+ max_threads 个 driver 可请求创建的 lazy PoolThread
-+ 进程自己手动 joinThreadPool() 加入的线程（额外增加）
-= 实际 Binder looper 总数
+   1 个主 PoolThread（startThreadPool 主动建，不计入 max_threads）
+ + 最多 max_threads 个 lazy 线程（BR_SPAWN_LOOPER 触发，计入）
+ + 进程手动 joinThreadPool() 加入的线程（不计入，另算）
+ = 实际 Binder looper 总数
 ```
 
-| 线程类型 | 是否计入 max_threads |
-| --- | --- |
-| `startThreadPool()` 创建的 `isMain=true` 主 `PoolThread` | 不计入（主动创建） |
-| `BR_SPAWN_LOOPER` 触发创建的 lazy `PoolThread` | 计入 |
-| 手动 `IPCThreadState::joinThreadPool()` 的线程 | 不计入（进程自己加的） |
+| 进程 | lazy 上限 `max_threads` | 常规总数口径 |
+| --- | --- | --- |
+| 普通进程默认 | 15 | 1 + 15 = **16** |
+| system_server | 31 | 1 + 31 = **32** |
 
-所以不要简单说“Binder 线程池最大 15 个”或“system_server 最大 31 个”。更准确的说法是：lazy 上限 15/31，常规总数口径 16/32，手动加入线程另算。
+所以别再笼统说「Binder 线程池最大 15 个」。**准确的说法是：lazy 上限 15/31，常规总数口径 16/32，手动加入的线程另算。**
 
 ---
 
-## 十一、oneway 和同步调用的区别
+## 十一、oneway 不是「免费调用」
 
-一句话结论：`oneway`（`TF_ONE_WAY`）不让 client 等 reply，不阻塞调用线程，但 server 仍然需要 Binder 线程执行，且受 async buffer、frozen process、spam detection 等约束，不是“免费调用”。
+一句话结论：`oneway`（`TF_ONE_WAY`）只是让 client **不等 reply、不阻塞**，但服务端**照样要占一个 Binder 线程**去执行，而且还额外受 async buffer、frozen process、spam detection 三重约束。
 
-| 特性 | 同步调用 | oneway 调用 |
+| 维度 | 同步调用 | oneway 调用 |
 | --- | --- | --- |
 | client 是否阻塞 | 是，等 `BR_REPLY` | 否，发出即返回 |
-| driver 是否维护 `transaction_stack` | 是（reply 要回到正确线程） | 否（无 reply） |
-| 是否有 `BC_REPLY` / `BR_REPLY` | 有 | 无 |
-| 入队方式 | 选中线程 -> `thread.todo`；无线程 -> `proc.todo` | 走 async 队列，受 target node async buffer 限制 |
-| 服务端是否消耗 Binder 线程 | 是 | 是 |
-| 特殊约束 | 反向同步调用可能死锁 | frozen process、oneway spam detection、async buffer 满会阻塞或报错 |
+| 维护 `transaction_stack` | 是（reply 要回原线程） | 否（没有 reply） |
+| `BC_REPLY` / `BR_REPLY` | 有 | 无 |
+| 入队方式 | 选中线程→`thread.todo`；否则→`proc.todo` | 走 async 队列，受目标 node 的 async buffer 限制 |
+| 是否消耗服务端 Binder 线程 | 是 | **是** |
+| 特殊风险 | 反向同步调用可能死锁 | async buffer 满、目标被冻结、被判定 spam |
 
-`oneway` 只是让 client 不等待结果，并不等于“丢给系统就不管了”——它仍然占用目标进程的 Binder 线程和 buffer 资源。实践里尤其要注意三类问题：
+三个实战中最容易踩的坑：
 
-1. **async buffer 是有限资源。** 大量 oneway 会占用目标进程的异步事务缓冲，堆积到一定程度后仍然可能影响调用成功率。
-2. **frozen process 有额外约束。** 目标进程被冻结时，异步事务不能简单按“立即执行”理解，driver 会结合冻结状态做拦截、排队或失败处理。
-3. **oneway spam detection 会识别异常发送方。** Android 新版本通过 `BINDER_ENABLE_ONEWAY_SPAM_DETECTION` 开启检测，异常 oneway 洪泛可能触发 `BR_ONEWAY_SPAM_SUSPECT` 等诊断信号。
+1. **async buffer 是有限资源。** 大量 oneway 会占满目标进程的异步事务缓冲，堆积到阈值后，后续 oneway 可能直接失败——「不阻塞」不等于「无限量」。
+2. **frozen process 有额外拦截。** 目标进程被冻结（App 进入后台被 cgroup freeze）时，异步事务不能按「立即执行」理解，driver 会结合冻结状态做拦截、排队或失败处理。
+3. **oneway spam detection 会盯异常发送方。** 新版本通过 `BINDER_ENABLE_ONEWAY_SPAM_DETECTION`（还记得第三章 `open_driver` 里那个 ioctl 吗）开启检测，oneway 洪泛会触发 `BR_ONEWAY_SPAM_SUSPECT` 等诊断信号。
 
 ---
 
-## 十二、调试 Binder 线程池问题看什么
+## 十二、实战：线程池出问题时看什么
 
-遇到 Binder 卡顿、system_server Binder 线程耗尽、服务调用超时，按以下方向排查：
+理解了机制，排查就有了抓手。遇到 Binder 卡顿、system_server 线程耗尽、服务调用超时，按下面的方向对号入座——每一条都能对应到前面某一章：
 
-| 排查方向 | 看什么 | 说明 |
+| 现象/方向 | 看什么 | 对应机制 |
 | --- | --- | --- |
-| 服务端线程在干什么 | Binder 线程堆栈 | 是否都卡在耗时 `onTransact()`、锁等待、IO 或反向同步调用 |
-| 是否长期无线程空闲 | `waiting_threads` 是否长期为空 | 为空说明请求在 `proc.todo` 排队或持续触发扩容 |
-| lazy 线程是否打满 | `requested_threads_started` vs `max_threads` | 接近上限说明线程池被打满 |
-| 同步调用是否过深 | `transaction_stack` | 深层嵌套 Binder 调用容易形成等待环或死锁 |
-| oneway 是否堆积 | async buffer 占用、`BR_ONEWAY_SPAM_SUSPECT` | oneway 不阻塞 client，但会耗尽服务端处理能力 |
-| 是否反向调用死锁 | `A -> B -> A` 模式 | 同步 Binder 重入可能形成死锁 |
-| 线程数配置 | 是否调用了 `BinderInternal.setMaxThreads` | system_server 设为 31，其他进程默认 15 |
+| 服务端线程都在忙什么 | Binder 线程堆栈 | 是否卡在耗时 `onTransact()`、锁、IO、反向调用（第八章） |
+| 是否长期没有空闲线程 | `waiting_threads` 是否总是空 | 空 = 请求都在 `proc.todo` 排队或不停扩容（第六、七章） |
+| lazy 线程是否打满 | `requested_threads_started` vs `max_threads` | 逼近上限 = 线程池被打爆（第九、十章） |
+| 同步调用是否太深 | `transaction_stack` | 深层嵌套易成等待环/死锁（第五、八章） |
+| oneway 是否堆积 | async buffer 占用、`BR_ONEWAY_SPAM_SUSPECT` | 不阻塞 client，但耗尽服务端线程（第十一章） |
+| 线程上限配置 | 是否调过 `setMaxThreads` | system_server 31，其余默认 15（第十章） |
 
-libbinder 创建的 pooled thread 线程名格式为 `binder:<pid>_<seq>`，通过线程名和堆栈可以判断它是在 `talkWithDriver()` 等待请求，还是正在执行某个 `onTransact()`。
-
-常用抓栈方式：
+线程名 `binder:<pid>_<seq>` 配合堆栈，一眼能看出它是**睡在 `talkWithDriver()` 等活**，还是**正在跑某个 `onTransact()`**。常用抓栈：
 
 ```bash
-# Java 进程可先抓 ANR trace
-kill -3 <pid>
-
-# Native / system 进程可直接抓所有线程 backtrace
-debuggerd -b <pid>
+kill -3 <pid>        # Java 进程：抓 ANR trace
+debuggerd -b <pid>   # Native / system 进程：抓所有线程 backtrace
 ```
 
-Binder driver 的调试节点路径和 Android 版本、内核配置、binderfs 挂载方式有关，常见位置包括：
+driver 侧的调试节点随 Android 版本、内核配置、binderfs 挂载方式而变，常见位置：
 
 ```bash
 /proc/binder/proc/<pid>
@@ -721,33 +622,33 @@ Binder driver 的调试节点路径和 Android 版本、内核配置、binderfs 
 /dev/binderfs/binder_logs/proc/<pid>
 ```
 
----
-
-## 十三、推荐源码阅读顺序
-
-不要从最复杂的 `binder_transaction()`（事务拷贝、偏移处理、`flat_binder_object` 解析）开始读，建议按线程池生命周期递进：
-
-1. `ProcessState::open_driver()` —— 进程如何打开 `/dev/binder`、设置 `BINDER_SET_MAX_THREADS`
-2. `ProcessState::startThreadPool()` / `spawnPooledThread()` —— 第一个 Binder 线程如何创建
-3. `IPCThreadState::joinThreadPool()` —— 线程如何注册为 looper、主循环如何运转
-4. `IPCThreadState::talkWithDriver()` —— `BINDER_WRITE_READ` 如何双向收发命令
-5. `binder_wait_for_work()`（kernel）—— 线程如何睡眠、如何进入 `waiting_threads`
-6. `binder_proc_transaction()` / `binder_select_thread_ilocked()`（kernel）—— 事务如何分发到 `thread.todo` 或 `proc.todo`
-7. `BR_SPAWN_LOOPER` 处理链路（kernel + userspace）—— 扩容如何从 driver 请求回到用户态创建线程
-8. 再读 `binder_transaction()`——理解事务 buffer 分配、`flat_binder_object` 处理、引用计数等细节
-
-这条路径从结构到细节，先建立心智模型，再填具体实现。
+里面能直接看到该进程的 `waiting_threads`、`requested_threads`、每个线程的 todo 和事务栈——正是前面几章那些字段的运行时快照。
 
 ---
 
-## 结语：先建立边界，再读源码
+## 十三、想读源码，按这个顺序
 
-理解 Binder 线程池最关键的一步，是先划清用户态和内核态的边界：
+别一上来就啃最复杂的 `binder_transaction()`（buffer 分配、偏移处理、`flat_binder_object` 解析全堆在里面）。按「线程池的一生」递进，先有心智模型再抠细节：
+
+1. `ProcessState::open_driver()` —— 进程怎么连上 driver、设上限（第三章）
+2. `startThreadPool()` / `spawnPooledThread()` —— 第一个线程怎么造（第三章）
+3. `IPCThreadState::joinThreadPool()` —— 怎么报到、主循环怎么转（第四章）
+4. `talkWithDriver()` —— `BINDER_WRITE_READ` 怎么双向收发（第四章）
+5. `binder_wait_for_work()` —— 线程怎么睡、怎么进 `waiting_threads`（第六章）
+6. `binder_proc_transaction()` / `binder_select_thread_ilocked()` —— 事务怎么分发（第七章）
+7. `BR_SPAWN_LOOPER` 处理链路 —— 扩容怎么从内核回到用户态（第九章）
+8. 最后再读 `binder_transaction()` —— buffer、`flat_binder_object`、引用计数等细节
+
+---
+
+## 结语：先划边界，源码就不再是迷宫
+
+如果读完只能记住一句话，请记住这条边界：
 
 ```text
-用户态负责创建和执行线程；
-driver 负责记录状态、排队、唤醒和请求扩容；
-BC_* / BR_* 是两者协作的语言。
+用户态：创建线程、执行线程；
+内核态：记录状态、排队事务、唤醒线程、请求扩容；
+BC_* / BR_*：两个世界之间唯一的通话语言。
 ```
 
-很多复杂系统都是这样——不要一头扎进实现细节，先搞清楚谁拥有状态、谁执行动作、谁发出信号、谁承担边界。一旦这个框架建立起来，源码就不再是迷宫，而是一张可以不断验证和修正的地图。
+Binder 线程池的所有「复杂」，本质都是这条边界的展开：线程在用户态出生、在内核里睡去、被内核唤醒、由内核请求增援。很多大型系统都是这个套路——**先搞清楚谁拥有状态、谁执行动作、谁发出信号，源码就从迷宫变成了一张能反复验证的地图。**
