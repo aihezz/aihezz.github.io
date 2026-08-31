@@ -1,0 +1,362 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="4800" height="9100" viewBox="0 0 4800 9100" style="background-color: #ffffff;">
+    <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M 0 1 L 9 5 L 0 9 Z" fill="#646a73" />
+        </marker>
+    </defs>
+
+
+    <g id="stage1">
+
+        <rect x="100" y="200" width="4600" height="1800" fill="none" stroke="#bbbfc4" stroke-width="6" rx="32" />
+        <path d="M132,200 L4668,200 Q4700,200 4700,232 L4700,350 L100,350 L100,232 Q100,200 132,200 Z" fill="#f5f5f5" />
+        <line x1="100" y1="350" x2="4700" y2="350" stroke="#dee0e3" stroke-width="4" />
+        <text x="2400" y="295" font-size="64" font-weight="bold" fill="#1f2329" text-anchor="middle">阶段一：《线程池启动与 looper 报到》</text>
+
+
+        <text x="900" y="420" font-size="48" font-weight="bold" fill="#8569cb" text-anchor="middle">Client 用户态</text>
+        <text x="2400" y="420" font-size="48" font-weight="bold" fill="#5178c6" text-anchor="middle">Binder Driver 内核态</text>
+        <text x="3900" y="420" font-size="48" font-weight="bold" fill="#509863" text-anchor="middle">Server 用户态</text>
+        <line x1="1650" y1="350" x2="1650" y2="2000" stroke="#dee0e3" stroke-width="4" stroke-dasharray="20,10" />
+        <line x1="3150" y1="350" x2="3150" y2="2000" stroke="#dee0e3" stroke-width="4" stroke-dasharray="20,10" />
+
+
+        <text x="900" y="1100" font-size="44" fill="#bbbfc4" text-anchor="middle">本阶段无参与</text>
+
+
+        <rect x="3350" y="500" width="1100" height="80" rx="16" fill="#dff5e5" stroke="#509863" stroke-width="4" />
+        <text x="3900" y="555" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">ZygoteInit.nativeZygoteInit / onZygoteInit</text>
+        <line x1="3900" y1="585" x2="3900" y2="675" stroke="#646a73" stroke-width="6" marker-end="url(#arrow)" />
+
+        <rect x="3350" y="680" width="1100" height="80" rx="16" fill="#dff5e5" stroke="#509863" stroke-width="4" />
+        <text x="3900" y="735" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">ProcessState::self</text>
+        <line x1="3900" y1="765" x2="3900" y2="855" stroke="#646a73" stroke-width="6" marker-end="url(#arrow)" />
+
+        <rect x="3350" y="860" width="1100" height="200" rx="16" fill="#dff5e5" stroke="#509863" stroke-width="4" />
+        <text x="3900" y="915" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">
+            <tspan x="3900" dy="0">open(/dev/binder)</tspan>
+            <tspan x="3900" dy="45">BINDER_VERSION</tspan>
+            <tspan x="3900" dy="45">BINDER_SET_MAX_THREADS</tspan>
+            <tspan x="3900" dy="45">mmap</tspan>
+        </text>
+        <line x1="3900" y1="1065" x2="3900" y2="1155" stroke="#646a73" stroke-width="6" marker-end="url(#arrow)" />
+
+        <rect x="3350" y="1160" width="1100" height="80" rx="16" fill="#dff5e5" stroke="#509863" stroke-width="4" />
+        <text x="3900" y="1215" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">startThreadPool -&gt; spawnPooledThread(true)</text>
+        <line x1="3900" y1="1245" x2="3900" y2="1335" stroke="#646a73" stroke-width="6" marker-end="url(#arrow)" />
+
+        <rect x="3350" y="1340" width="1100" height="80" rx="16" fill="#dff5e5" stroke="#509863" stroke-width="4" />
+        <text x="3900" y="1395" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">主 PoolThread（真实 pthread）</text>
+        <line x1="3900" y1="1425" x2="3900" y2="1515" stroke="#646a73" stroke-width="6" marker-end="url(#arrow)" />
+
+        <rect x="3350" y="1520" width="1100" height="80" rx="16" fill="#dff5e5" stroke="#509863" stroke-width="4" />
+        <text x="3900" y="1575" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">IPCThreadState.joinThreadPool(true)</text>
+
+
+        <line x1="3350" y1="1560" x2="2960" y2="1560" stroke="#646a73" stroke-width="6" marker-end="url(#arrow)" />
+        <text x="3155" y="1520" font-size="36" fill="#646a73" text-anchor="middle">
+            <tspan x="3155" dy="0">BC_ENTER_LOOPER</tspan>
+            <tspan x="3155" dy="45">+ ioctl(BINDER_WRITE_READ)</tspan>
+        </text>
+
+
+        <rect x="1850" y="1480" width="1100" height="160" rx="16" fill="#f0f4fc" stroke="#5178c6" stroke-width="4" />
+        <text x="2400" y="1545" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">
+            <tspan x="2400" dy="0">创建/维护 binder_proc 与 binder_thread</tspan>
+            <tspan x="2400" dy="55">记录 looper=ENTERED</tspan>
+        </text>
+        <rect x="1850" y="1750" width="1100" height="80" rx="16" fill="#eff0f1" stroke="none" />
+        <text x="2400" y="1802" font-size="36" fill="#646a73" text-anchor="middle">旁注：binder_thread 是 pthread 的内核状态记录，不是内核线程</text>
+    </g>
+
+
+    <g id="stage2">
+
+        <rect x="100" y="2100" width="4600" height="1300" fill="none" stroke="#bbbfc4" stroke-width="6" rx="32" />
+        <path d="M132,2100 L4668,2100 Q4700,2100 4700,2132 L4700,2250 L100,2250 L100,2132 Q100,2100 132,2100 Z" fill="#f5f5f5" />
+        <line x1="100" y1="2250" x2="4700" y2="2250" stroke="#dee0e3" stroke-width="4" />
+        <text x="2400" y="2195" font-size="64" font-weight="bold" fill="#1f2329" text-anchor="middle">阶段二：《Looper 待命》</text>
+
+
+        <text x="900" y="2320" font-size="48" font-weight="bold" fill="#8569cb" text-anchor="middle">Client 用户态</text>
+        <text x="2400" y="2320" font-size="48" font-weight="bold" fill="#5178c6" text-anchor="middle">Binder Driver 内核态</text>
+        <text x="3900" y="2320" font-size="48" font-weight="bold" fill="#509863" text-anchor="middle">Server 用户态</text>
+        <line x1="1650" y1="2250" x2="1650" y2="3400" stroke="#dee0e3" stroke-width="4" stroke-dasharray="20,10" />
+        <line x1="3150" y1="2250" x2="3150" y2="3400" stroke="#dee0e3" stroke-width="4" stroke-dasharray="20,10" />
+
+
+        <text x="900" y="2750" font-size="44" fill="#bbbfc4" text-anchor="middle">本阶段无参与</text>
+
+
+        <rect x="3350" y="2450" width="1100" height="120" rx="16" fill="#dff5e5" stroke="#509863" stroke-width="4" />
+        <text x="3900" y="2500" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">
+            <tspan x="3900" dy="0">IPCThreadState.talkWithDriver</tspan>
+            <tspan x="3900" dy="50">ioctl(BINDER_WRITE_READ) 阻塞</tspan>
+        </text>
+
+
+        <line x1="3350" y1="2510" x2="2960" y2="2510" stroke="#646a73" stroke-width="6" marker-end="url(#arrow)" />
+
+
+        <rect x="1850" y="2470" width="1100" height="80" rx="16" fill="#f0f4fc" stroke="#5178c6" stroke-width="4" />
+        <text x="2400" y="2525" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">binder_wait_for_work</text>
+        <line x1="2400" y1="2555" x2="2400" y2="2645" stroke="#646a73" stroke-width="6" marker-end="url(#arrow)" />
+
+        <rect x="1850" y="2650" width="1100" height="80" rx="16" fill="#f0f4fc" stroke="#5178c6" stroke-width="4" />
+        <text x="2400" y="2705" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">binder_thread 加入 binder_proc.waiting_threads</text>
+        <line x1="2400" y1="2735" x2="2400" y2="2825" stroke="#646a73" stroke-width="6" marker-end="url(#arrow)" />
+
+        <rect x="1850" y="2830" width="1100" height="80" rx="16" fill="#f0f4fc" stroke="#5178c6" stroke-width="4" />
+        <text x="2400" y="2885" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">schedule() 睡眠</text>
+
+
+        <rect x="1850" y="3010" width="1100" height="160" rx="16" fill="#fef1ce" stroke="#d4b45b" stroke-width="4" />
+        <text x="2400" y="3070" font-size="36" font-weight="bold" fill="#1f2329" text-anchor="middle">
+            <tspan x="2400" dy="0">binder_proc.todo=进程公共待办</tspan>
+            <tspan x="2400" dy="45">binder_thread.todo=线程私有待办</tspan>
+            <tspan x="2400" dy="45">transaction_stack=同步调用/reply 回投</tspan>
+        </text>
+
+        <rect x="1850" y="3270" width="1100" height="80" rx="16" fill="#eff0f1" stroke="none" />
+        <text x="2400" y="3322" font-size="36" font-weight="bold" fill="#646a73" text-anchor="middle">结论：无用户态忙轮询，waiting_threads 是可接活 looper 名单</text>
+    </g>
+
+
+    <g id="stage3">
+
+        <rect x="100" y="3500" width="4600" height="2900" fill="none" stroke="#bbbfc4" stroke-width="6" rx="32" />
+        <path d="M132,3500 L4668,3500 Q4700,3500 4700,3532 L4700,3650 L100,3650 L100,3532 Q100,3500 132,3500 Z" fill="#f5f5f5" />
+        <line x1="100" y1="3650" x2="4700" y2="3650" stroke="#dee0e3" stroke-width="4" />
+        <text x="2400" y="3595" font-size="64" font-weight="bold" fill="#1f2329" text-anchor="middle">阶段三：《同步事务与 Reply》</text>
+
+
+        <text x="900" y="3720" font-size="48" font-weight="bold" fill="#8569cb" text-anchor="middle">Client 用户态</text>
+        <text x="2400" y="3720" font-size="48" font-weight="bold" fill="#5178c6" text-anchor="middle">Binder Driver 内核态</text>
+        <text x="3900" y="3720" font-size="48" font-weight="bold" fill="#509863" text-anchor="middle">Server 用户态</text>
+        <line x1="1650" y1="3650" x2="1650" y2="6400" stroke="#dee0e3" stroke-width="4" stroke-dasharray="20,10" />
+        <line x1="3150" y1="3650" x2="3150" y2="6400" stroke="#dee0e3" stroke-width="4" stroke-dasharray="20,10" />
+
+
+        <rect x="350" y="3850" width="1100" height="80" rx="16" fill="#eae2fe" stroke="#8569cb" stroke-width="4" />
+        <text x="900" y="3905" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">Binder Proxy.transact</text>
+        <line x1="900" y1="3935" x2="900" y2="4025" stroke="#646a73" stroke-width="6" marker-end="url(#arrow)" />
+
+        <rect x="350" y="4030" width="1100" height="80" rx="16" fill="#eae2fe" stroke="#8569cb" stroke-width="4" />
+        <text x="900" y="4085" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">写 BC_TRANSACTION</text>
+        <line x1="900" y1="4115" x2="900" y2="4205" stroke="#646a73" stroke-width="6" marker-end="url(#arrow)" />
+
+        <rect x="350" y="4210" width="1100" height="80" rx="16" fill="#eae2fe" stroke="#8569cb" stroke-width="4" />
+        <text x="900" y="4265" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">ioctl(BINDER_WRITE_READ)</text>
+
+
+        <line x1="1450" y1="4250" x2="1840" y2="4250" stroke="#646a73" stroke-width="6" marker-end="url(#arrow)" />
+        <text x="1645" y="4235" font-size="36" font-weight="bold" fill="#646a73" text-anchor="middle">BC_TRANSACTION</text>
+
+
+        <rect x="1850" y="4210" width="1100" height="80" rx="16" fill="#f0f4fc" stroke="#5178c6" stroke-width="4" />
+        <text x="2400" y="4265" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">binder_thread_write</text>
+        <line x1="2400" y1="4295" x2="2400" y2="4385" stroke="#646a73" stroke-width="6" marker-end="url(#arrow)" />
+
+        <rect x="1850" y="4390" width="1100" height="120" rx="16" fill="#f0f4fc" stroke="#5178c6" stroke-width="4" />
+        <text x="2400" y="4445" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">
+            <tspan x="2400" dy="0">binder_transaction</tspan>
+            <tspan x="2400" dy="50">（定位目标 / 分配 buffer / 拷贝）</tspan>
+        </text>
+        <line x1="2400" y1="4515" x2="2400" y2="4605" stroke="#646a73" stroke-width="6" marker-end="url(#arrow)" />
+
+        <rect x="1850" y="4610" width="1100" height="80" rx="16" fill="#f0f4fc" stroke="#5178c6" stroke-width="4" />
+        <text x="2400" y="4665" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">binder_proc_transaction</text>
+        <line x1="2400" y1="4695" x2="2400" y2="4785" stroke="#646a73" stroke-width="6" marker-end="url(#arrow)" />
+
+
+        <polygon points="2400,4790 2625,4870 2400,4950 2175,4870" fill="#f0f4fc" stroke="#5178c6" stroke-width="4" />
+        <text x="2400" y="4860" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">
+            <tspan x="2400" dy="0">waiting_threads</tspan>
+            <tspan x="2400" dy="45">有空闲线程？</tspan>
+        </text>
+
+
+        <line x1="2630" y1="4870" x2="2720" y2="4870" stroke="#646a73" stroke-width="6" marker-end="url(#arrow)" />
+        <text x="2675" y="4855" font-size="36" font-weight="bold" fill="#1f2329" text-anchor="middle">No</text>
+        <rect x="2730" y="4810" width="320" height="120" rx="12" fill="#eff0f1" stroke="none" />
+        <text x="2890" y="4850" font-size="32" font-weight="bold" fill="#646a73" text-anchor="middle">
+            <tspan x="2890" dy="0">work 入</tspan>
+            <tspan x="2890" dy="40">binder_proc.todo</tspan>
+            <tspan x="2890" dy="40">(转阶段四扩容判断)</tspan>
+        </text>
+
+
+        <line x1="2400" y1="4955" x2="2400" y2="5040" stroke="#646a73" stroke-width="6" marker-end="url(#arrow)" />
+        <text x="2425" y="5015" font-size="36" font-weight="bold" fill="#1f2329" text-anchor="start">Yes</text>
+
+        <rect x="1850" y="5050" width="1100" height="120" rx="16" fill="#f0f4fc" stroke="#5178c6" stroke-width="4" />
+        <text x="2400" y="5100" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">
+            <tspan x="2400" dy="0">binder_select_thread_ilocked</tspan>
+            <tspan x="2400" dy="50">work 入 thread.todo / wake_up</tspan>
+        </text>
+
+
+        <line x1="2950" y1="5110" x2="3340" y2="5110" stroke="#646a73" stroke-width="6" marker-end="url(#arrow)" />
+        <text x="3145" y="5095" font-size="36" font-weight="bold" fill="#646a73" text-anchor="middle">BR_TRANSACTION</text>
+
+
+        <rect x="3350" y="5070" width="1100" height="80" rx="16" fill="#dff5e5" stroke="#509863" stroke-width="4" />
+        <text x="3900" y="5125" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">looper 读到 BR_TRANSACTION</text>
+        <line x1="3900" y1="5155" x2="3900" y2="5245" stroke="#646a73" stroke-width="6" marker-end="url(#arrow)" />
+
+        <rect x="3350" y="5250" width="1100" height="80" rx="16" fill="#dff5e5" stroke="#509863" stroke-width="4" />
+        <text x="3900" y="5305" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">IPCThreadState.executeCommand</text>
+        <line x1="3900" y1="5335" x2="3900" y2="5425" stroke="#646a73" stroke-width="6" marker-end="url(#arrow)" />
+
+        <rect x="3350" y="5430" width="1100" height="80" rx="16" fill="#dff5e5" stroke="#509863" stroke-width="4" />
+        <text x="3900" y="5485" font-size="36" font-weight="bold" fill="#1f2329" text-anchor="middle">Parcel 包装 buffer + 设置 callingPid / callingUid</text>
+        <line x1="3900" y1="5515" x2="3900" y2="5605" stroke="#646a73" stroke-width="6" marker-end="url(#arrow)" />
+
+        <rect x="3350" y="5610" width="1100" height="80" rx="16" fill="#dff5e5" stroke="#509863" stroke-width="4" />
+        <text x="3900" y="5665" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">BBinder::transact / Stub.onTransact</text>
+        <line x1="3900" y1="5695" x2="3900" y2="5785" stroke="#646a73" stroke-width="6" marker-end="url(#arrow)" />
+
+        <rect x="3350" y="5790" width="1100" height="80" rx="16" fill="#dff5e5" stroke="#509863" stroke-width="4" />
+        <text x="3900" y="5845" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">业务执行</text>
+        <line x1="3900" y1="5875" x2="3900" y2="5965" stroke="#646a73" stroke-width="6" marker-end="url(#arrow)" />
+
+        <rect x="3350" y="5970" width="1100" height="80" rx="16" fill="#dff5e5" stroke="#509863" stroke-width="4" />
+        <text x="3900" y="6025" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">写 BC_REPLY</text>
+
+
+        <line x1="3350" y1="6010" x2="2960" y2="6010" stroke="#646a73" stroke-width="6" marker-end="url(#arrow)" />
+        <text x="3155" y="5995" font-size="36" font-weight="bold" fill="#646a73" text-anchor="middle">BC_REPLY</text>
+
+
+        <rect x="1850" y="5930" width="1100" height="200" rx="16" fill="#f0f4fc" stroke="#5178c6" stroke-width="4" />
+        <text x="2400" y="6015" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">
+            <tspan x="2400" dy="0">按 transaction_stack</tspan>
+            <tspan x="2400" dy="50">将 reply 投回原 Client 线程</tspan>
+        </text>
+
+
+        <line x1="1850" y1="6090" x2="1460" y2="6090" stroke="#646a73" stroke-width="6" marker-end="url(#arrow)" />
+        <text x="1655" y="6075" font-size="36" font-weight="bold" fill="#646a73" text-anchor="middle">BR_REPLY</text>
+
+
+        <rect x="350" y="6050" width="1100" height="80" rx="16" fill="#eae2fe" stroke="#8569cb" stroke-width="4" />
+        <text x="900" y="6105" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">收到 BR_REPLY</text>
+        <line x1="900" y1="6135" x2="900" y2="6225" stroke="#646a73" stroke-width="6" marker-end="url(#arrow)" />
+
+        <rect x="350" y="6230" width="1100" height="80" rx="16" fill="#eae2fe" stroke="#8569cb" stroke-width="4" />
+        <text x="900" y="6285" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">同步调用返回</text>
+    </g>
+
+
+    <g id="stage4">
+
+        <rect x="100" y="6500" width="4600" height="1700" fill="none" stroke="#bbbfc4" stroke-width="6" rx="32" />
+        <path d="M132,6500 L4668,6500 Q4700,6500 4700,6532 L4700,6650 L100,6650 L100,6532 Q100,6500 132,6500 Z" fill="#f5f5f5" />
+        <line x1="100" y1="6650" x2="4700" y2="6650" stroke="#dee0e3" stroke-width="4" />
+        <text x="2400" y="6595" font-size="64" font-weight="bold" fill="#1f2329" text-anchor="middle">阶段四：《按需扩容》</text>
+
+
+        <text x="900" y="6720" font-size="48" font-weight="bold" fill="#8569cb" text-anchor="middle">Client 用户态</text>
+        <text x="2400" y="6720" font-size="48" font-weight="bold" fill="#5178c6" text-anchor="middle">Binder Driver 内核态</text>
+        <text x="3900" y="6720" font-size="48" font-weight="bold" fill="#509863" text-anchor="middle">Server 用户态</text>
+        <line x1="1650" y1="6650" x2="1650" y2="8200" stroke="#dee0e3" stroke-width="4" stroke-dasharray="20,10" />
+        <line x1="3150" y1="6650" x2="3150" y2="8200" stroke="#dee0e3" stroke-width="4" stroke-dasharray="20,10" />
+
+
+        <text x="900" y="7350" font-size="44" fill="#bbbfc4" text-anchor="middle">本阶段无参与</text>
+
+
+        <rect x="1850" y="6850" width="1100" height="240" rx="16" fill="#f0f4fc" stroke="#5178c6" stroke-width="4" stroke-dasharray="10,10" />
+        <text x="2400" y="6925" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">
+            <tspan x="2400" dy="0">requested_threads == 0</tspan>
+            <tspan x="2400" dy="50">waiting_threads 为空</tspan>
+            <tspan x="2400" dy="50">requested_threads_started &lt; max_threads</tspan>
+            <tspan x="2400" dy="50">当前线程是 REGISTERED/ENTERED looper</tspan>
+        </text>
+        <line x1="2400" y1="7095" x2="2400" y2="7180" stroke="#646a73" stroke-width="6" marker-end="url(#arrow)" />
+        <text x="2420" y="7150" font-size="36" font-weight="bold" fill="#1f2329">全部成立</text>
+
+        <rect x="1850" y="7190" width="1100" height="80" rx="16" fill="#f0f4fc" stroke="#5178c6" stroke-width="4" />
+        <text x="2400" y="7245" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">返回 BR_SPAWN_LOOPER</text>
+
+
+        <line x1="2950" y1="7230" x2="3340" y2="7230" stroke="#646a73" stroke-width="6" marker-end="url(#arrow)" />
+        <text x="3145" y="7215" font-size="36" font-weight="bold" fill="#646a73" text-anchor="middle">BR_SPAWN_LOOPER</text>
+
+
+        <rect x="3350" y="7190" width="1100" height="80" rx="16" fill="#dff5e5" stroke="#509863" stroke-width="4" />
+        <text x="3900" y="7245" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">IPCThreadState.executeCommand</text>
+        <line x1="3900" y1="7275" x2="3900" y2="7365" stroke="#646a73" stroke-width="6" marker-end="url(#arrow)" />
+
+        <rect x="3350" y="7370" width="1100" height="80" rx="16" fill="#dff5e5" stroke="#509863" stroke-width="4" />
+        <text x="3900" y="7425" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">ProcessState.spawnPooledThread(false)</text>
+        <line x1="3900" y1="7455" x2="3900" y2="7545" stroke="#646a73" stroke-width="6" marker-end="url(#arrow)" />
+
+        <rect x="3350" y="7550" width="1100" height="80" rx="16" fill="#dff5e5" stroke="#509863" stroke-width="4" />
+        <text x="3900" y="7605" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">创建 lazy PoolThread（真实 pthread）</text>
+        <line x1="3900" y1="7635" x2="3900" y2="7725" stroke="#646a73" stroke-width="6" marker-end="url(#arrow)" />
+
+        <rect x="3350" y="7730" width="1100" height="80" rx="16" fill="#dff5e5" stroke="#509863" stroke-width="4" />
+        <text x="3900" y="7785" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">joinThreadPool(false)</text>
+        <line x1="3900" y1="7815" x2="3900" y2="7905" stroke="#646a73" stroke-width="6" marker-end="url(#arrow)" />
+
+        <rect x="3350" y="7910" width="1100" height="80" rx="16" fill="#dff5e5" stroke="#509863" stroke-width="4" />
+        <text x="3900" y="7965" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">发送 BC_REGISTER_LOOPER</text>
+
+
+        <line x1="3350" y1="7950" x2="2960" y2="7950" stroke="#646a73" stroke-width="6" marker-end="url(#arrow)" />
+        <text x="3155" y="7935" font-size="36" font-weight="bold" fill="#646a73" text-anchor="middle">BC_REGISTER_LOOPER</text>
+
+
+        <rect x="1850" y="7890" width="1100" height="120" rx="16" fill="#f0f4fc" stroke="#5178c6" stroke-width="4" />
+        <text x="2400" y="7940" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">
+            <tspan x="2400" dy="0">requested_threads-- / requested_threads_started++</tspan>
+            <tspan x="2400" dy="50">looper=REGISTERED / 新线程进入 waiting_threads</tspan>
+        </text>
+
+
+        <rect x="1650" y="8100" width="3000" height="80" rx="16" fill="#fee3e2" stroke="#d25d5a" stroke-width="4" />
+        <text x="3150" y="8152" font-size="44" font-weight="bold" fill="#d25d5a" text-anchor="middle">结论：内核只请求扩容，不创建 pthread；真实线程由用户态 libbinder 创建。</text>
+    </g>
+
+
+    <g id="bottom_cards">
+
+        <rect x="150" y="8400" width="1450" height="500" rx="24" fill="#f5f5f5" stroke="#bbbfc4" stroke-width="4" />
+        <text x="190" y="8470" font-size="48" font-weight="bold" fill="#5178c6">A 核心角色</text>
+        <text x="190" y="8550" font-size="40" fill="#1f2329">
+            <tspan x="190" dy="0" font-weight="bold">ProcessState：</tspan><tspan font-weight="normal">管理全局 Binder 设备与参数</tspan>
+            <tspan x="190" dy="60" font-weight="bold">IPCThreadState：</tspan><tspan font-weight="normal">负责当前线程与内核的单线通信</tspan>
+            <tspan x="190" dy="60" font-weight="bold">PoolThread：</tspan><tspan font-weight="normal">用户态创建的真实执行载体 (pthread)</tspan>
+            <tspan x="190" dy="60" font-weight="bold">binder_proc：</tspan><tspan font-weight="normal">内核中代表当前进程的状态结构</tspan>
+            <tspan x="190" dy="60" font-weight="bold">binder_thread：</tspan><tspan font-weight="normal">内核中代表当前线程的通信上下文</tspan>
+            <tspan x="190" dy="60" font-weight="bold">binder_transaction：</tspan><tspan font-weight="normal">内核负责跨进程数据分发与内存映射的载体</tspan>
+        </text>
+
+
+        <rect x="1675" y="8400" width="1450" height="500" rx="24" fill="#f5f5f5" stroke="#bbbfc4" stroke-width="4" />
+        <text x="1715" y="8470" font-size="48" font-weight="bold" fill="#5178c6">B 线程数口径</text>
+        <text x="1715" y="8550" font-size="40" fill="#1f2329">
+            <tspan x="1715" dy="0">• 普通进程 lazy 线程上限通常设为 15</tspan>
+            <tspan x="1715" dy="60">• 主 PoolThread 不计入 max_threads</tspan>
+            <tspan x="1715" dy="60">• 常规总数：1 主 + 15 Lazy = 16</tspan>
+            <tspan x="1715" dy="60">• system_server 常设 31，常规总数 32</tspan>
+            <tspan x="1715" dy="60">• 手动调用 joinThreadPool 的线程另算</tspan>
+            <tspan x="1715" dy="60">• 具体上限与策略随系统版本可能存在变化</tspan>
+        </text>
+
+
+        <rect x="3200" y="8400" width="1450" height="500" rx="24" fill="#f5f5f5" stroke="#bbbfc4" stroke-width="4" />
+        <text x="3240" y="8470" font-size="48" font-weight="bold" fill="#5178c6">C oneway 机制约束</text>
+        <text x="3240" y="8550" font-size="40" fill="#1f2329">
+            <tspan x="3240" dy="0">• Client 发送即返回，不等待 reply 回投</tspan>
+            <tspan x="3240" dy="60">• Server 端接收到事务仍消耗 Binder 线程池</tspan>
+            <tspan x="3240" dy="60">• 协议表现：无 transaction reply 过程（单向链路）</tspan>
+            <tspan x="3240" dy="60">• 受限于 async buffer（一半内存）及 spam detection</tspan>
+            <tspan x="3240" dy="60">• 后台进程大量 oneway 易在冻结时引发溢出问题</tspan>
+        </text>
+    </g>
+
+
+    <text x="100" y="9050" font-size="32" fill="#8f959e">由 Mind AI 生成</text>
+</svg>

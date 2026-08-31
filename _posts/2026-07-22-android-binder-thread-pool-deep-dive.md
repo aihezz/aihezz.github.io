@@ -33,56 +33,9 @@ tags: [Android, Binder, 源码分析, 进程通信]
 
 一句话：**用户态出线程，内核出调度。** 普通线程池是「用户态队列 + worker 主动取任务」；Binder 线程池是「worker 睡在内核上，内核直接把活塞给它并唤醒」。正因如此，扩容信号只能由内核**主动下发**，用户态无从自己判断。
 
-带着这条边界，看这张全景图——后面所有源码，都只是在把它落地：
+带着这条边界，看这张全景图——后面所有源码，都只是在把它落地。图中把线程池启动、Looper 待命、同步事务与 Reply、按需扩容拆成四个独立阶段；点击图片可以打开 SVG 原图无损放大。
 
-```text
-                          ┌─────────────────────────────────────────┐
-                          │            一个 Android 进程              │
-                          │                                         │
-  BC_TRANSACTION ────────►│  ┌─────────────┐                         │
-  BC_REPLY         ioctl  │  │ ProcessState│◄── 进程级：连接 driver、 │
-  BC_ENTER_LOOPER  ──────►│  │ (用户态单例)│     设置 maxThreads、    │
-  BC_REGISTER_LOOPER      │  └──────┬──────┘     创建 PoolThread      │
-  BC_EXIT_LOOPER          │         │ spawnPooledThread()             │
-                          │         ▼                                 │
-                          │  ┌─────────────┐    ┌─────────────┐      │
-                          │  │ PoolThread 1│    │ PoolThread 2│ ...  │  ← 用户态真实 pthread
-                          │  │ (isMain=true)│   │  (lazy)     │      │
-                          │  └──────┬──────┘    └──────┬──────┘      │
-                          │         │ joinThreadPool()  │             │
-                          │         ▼                   ▼             │
-                          │  ┌─────────────────────────────────┐     │
-                          │  │        IPCThreadState            │     │  ← 每线程持有一个
-                          │  │  talkWithDriver()                │     │
-                          │  │  executeCommand() -> onTransact()│     │
-                          │  └──────────────┬──────────────────┘     │
-                          │                 │ BINDER_WRITE_READ       │
-                          └─────────────────┼─────────────────────────┘
-                                            │ ioctl
-                          ┌─────────────────┼─────────────────────────┐
-                          │  binder driver  ▼                         │
-                          │  (内核态)                                │
-                          │  ┌──────────────────────────────────┐     │
-                          │  │  binder_proc (每个进程一个)        │     │
-                          │  │  - waiting_threads (空闲线程队列)  │     │
-                          │  │  - todo (进程级工作队列)           │     │
-                          │  │  - max_threads                    │     │
-                          │  │  - requested_threads_started      │     │
-                          │  └──────┬───────────────┬───────────┘     │
-                          │         │               │                 │
-                          │         ▼               ▼                 │
-                          │  ┌────────────┐  ┌────────────┐           │
-                          │  │binder_thr 1│  │binder_thr 2│  ...      │  ← 用户态线程在内核的影子
-                          │  │ - looper   │  │ - looper   │           │
-                          │  │ - txn_stack│  │ - txn_stack│           │
-                          │  │ - todo     │  │ - todo     │           │
-                          │  └────────────┘  └────────────┘           │
-                          │                                         │
-                          │  BR_TRANSACTION ──► 唤醒线程执行          │
-                          │  BR_REPLY       ──► 唤醒等待同步返回的线程 │
-                          │  BR_SPAWN_LOOPER ──► 请求用户态创建新线程  │
-                          └─────────────────────────────────────────┘
-```
+[![Binder 线程池全景原理图](/assets/img/posts/2026-07-22-android-binder-thread-pool-deep-dive/binder-thread-pool-panorama.svg)](/assets/img/posts/2026-07-22-android-binder-thread-pool-deep-dive/binder-thread-pool-panorama.svg)
 
 图里的 6 个角色，各司其职：
 
