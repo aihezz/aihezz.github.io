@@ -1,0 +1,348 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="4800" height="6200" viewBox="0 0 4800 6200" style="background-color:#ffffff;">
+  <defs>
+
+    <marker id="arrow-gray" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,1 L8,5 L0,9 Z" fill="#646a73" />
+    </marker>
+
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,1 L8,5 L0,9 Z" fill="#5178c6" />
+    </marker>
+
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0,1 L8,5 L0,9 Z" fill="#509863" />
+    </marker>
+  </defs>
+
+
+  <line x1="1440" y1="100" x2="1440" y2="5300" stroke="#dee0e3" stroke-width="4" stroke-dasharray="16 16" fill="none" />
+  <line x1="2880" y1="100" x2="2880" y2="5300" stroke="#dee0e3" stroke-width="4" stroke-dasharray="16 16" fill="none" />
+
+  <rect x="150" y="80" width="1140" height="80" rx="8" fill="#eae2fe" stroke="none" />
+  <text x="720" y="135" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">当前进程 (Caller Process)</text>
+
+  <rect x="1590" y="80" width="1140" height="80" rx="8" fill="#f0f4fc" stroke="none" />
+  <text x="2160" y="135" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">system_server (AMS / ContentProviderHelper)</text>
+
+  <rect x="3030" y="80" width="1620" height="80" rx="8" fill="#dff5e5" stroke="none" />
+  <text x="3840" y="135" font-size="40" font-weight="bold" fill="#1f2329" text-anchor="middle">目标 Provider 进程 (Provider Process)</text>
+
+
+
+
+
+  <path d="M 720 380 L 720 500" stroke="#646a73" stroke-width="4" fill="none" marker-end="url(#arrow-gray)" />
+  <path d="M 720 580 L 720 700" stroke="#646a73" stroke-width="4" fill="none" marker-end="url(#arrow-gray)" />
+
+  <path d="M 720 800 L 720 900" stroke="#646a73" stroke-width="4" fill="none" marker-end="url(#arrow-gray)" />
+  <text x="740" y="860" font-size="28" font-weight="bold" fill="#646a73">命中</text>
+  <path d="M 840 750 L 1880 750" stroke="#646a73" stroke-width="4" fill="none" marker-end="url(#arrow-gray)" />
+  <text x="1360" y="735" font-size="28" font-weight="bold" fill="#646a73">未命中</text>
+
+
+  <path d="M 840 950 L 3000 950" stroke="#509863" stroke-width="5" fill="none" marker-end="url(#arrow-green)" />
+  <text x="1800" y="935" font-size="32" font-weight="bold" fill="#509863">A (同进程已安装)</text>
+
+
+  <path d="M 720 1000 L 720 1200" stroke="#5178c6" stroke-width="5" fill="none" marker-end="url(#arrow-blue)" />
+  <text x="740" y="1100" font-size="32" font-weight="bold" fill="#5178c6">B</text>
+
+  <path d="M 480 1240 L 350 1240 L 350 4570 L 540 4570" stroke="#5178c6" stroke-width="5" fill="none" marker-end="url(#arrow-blue)" />
+
+
+  <path d="M 2160 800 L 2160 1100" stroke="#646a73" stroke-width="4" fill="none" marker-end="url(#arrow-gray)" />
+
+  <path d="M 2310 1150 L 3600 1150" stroke="#509863" stroke-width="5" fill="none" marker-end="url(#arrow-green)" />
+  <text x="2800" y="1135" font-size="32" font-weight="bold" fill="#509863">C true</text>
+  <path d="M 3820 1190 L 3820 1310" stroke="#509863" stroke-width="5" fill="none" marker-end="url(#arrow-green)" />
+
+
+
+  <path d="M 3220 990 L 3220 1500 L 3440 1500 L 3440 1550" stroke="#509863" stroke-width="5" fill="none" marker-end="url(#arrow-green)" />
+
+  <path d="M 3820 1430 L 3820 1500 L 3440 1500 L 3440 1550" stroke="#509863" stroke-width="5" fill="none" marker-end="url(#arrow-green)" />
+
+  <path d="M 3440 1590 L 3440 1650" stroke="#509863" stroke-width="5" fill="none" marker-end="url(#arrow-green)" />
+
+
+  <path d="M 2160 1200 L 2160 1350" stroke="#646a73" stroke-width="4" fill="none" marker-end="url(#arrow-gray)" />
+  <text x="2180" y="1280" font-size="28" font-weight="bold" fill="#646a73">false</text>
+
+  <path d="M 2010 1400 L 1940 1400" stroke="#5178c6" stroke-width="5" fill="none" marker-end="url(#arrow-blue)" />
+  <text x="1950" y="1380" font-size="32" font-weight="bold" fill="#5178c6">D yes</text>
+  <path d="M 1500 1400 L 850 1400" stroke="#5178c6" stroke-width="5" fill="none" marker-end="url(#arrow-blue)" />
+  <path d="M 590 1400 L 350 1400" stroke="#5178c6" stroke-width="5" fill="none" />
+
+
+  <path d="M 2160 1450 L 2160 1950" stroke="#646a73" stroke-width="4" fill="none" marker-end="url(#arrow-gray)" />
+  <text x="2180" y="1700" font-size="28" font-weight="bold" fill="#646a73">no</text>
+
+  <path d="M 2310 2000 L 2400 2000" stroke="#646a73" stroke-width="4" fill="none" marker-end="url(#arrow-gray)" />
+  <text x="2330" y="1985" font-size="28" font-weight="bold" fill="#646a73">yes</text>
+
+
+  <path d="M 2840 2000 L 3200 2000" stroke="#646a73" stroke-width="4" fill="none" marker-end="url(#arrow-gray)" />
+  <path d="M 3440 2050 L 3440 2130 L 2020 2130" stroke="#646a73" stroke-width="4" fill="none" marker-end="url(#arrow-gray)" />
+  <path d="M 1700 2130 L 870 2130" stroke="#646a73" stroke-width="4" fill="none" marker-end="url(#arrow-gray)" />
+  <path d="M 570 2130 L 350 2130" stroke="#5178c6" stroke-width="5" fill="none" />
+
+
+
+  <path d="M 2160 2050 L 2160 2250" stroke="#646a73" stroke-width="5" fill="none" marker-end="url(#arrow-gray)" />
+  <text x="2180" y="2150" font-size="32" font-weight="bold" fill="#646a73">E no</text>
+
+  <path d="M 2160 2330 L 2160 2380 L 3440 2380 L 3440 2450" stroke="#646a73" stroke-width="4" fill="none" marker-end="url(#arrow-gray)" />
+  <path d="M 3440 2530 L 3440 2580 L 2160 2580 L 2160 2650" stroke="#646a73" stroke-width="4" fill="none" marker-end="url(#arrow-gray)" />
+  <path d="M 2160 2730 L 2160 2780 L 3440 2780 L 3440 2850" stroke="#646a73" stroke-width="4" fill="none" marker-end="url(#arrow-gray)" />
+
+  <path d="M 3440 2930 L 3440 3050" stroke="#646a73" stroke-width="4" fill="none" marker-end="url(#arrow-gray)" />
+  <path d="M 3440 3150 L 3440 3250" stroke="#646a73" stroke-width="4" fill="none" marker-end="url(#arrow-gray)" />
+  <path d="M 3440 3350 L 3440 3450" stroke="#646a73" stroke-width="4" fill="none" marker-end="url(#arrow-gray)" />
+  <path d="M 3440 3550 L 3440 3650" stroke="#646a73" stroke-width="4" fill="none" marker-end="url(#arrow-gray)" />
+  <path d="M 3440 3750 L 3440 3850" stroke="#646a73" stroke-width="4" fill="none" marker-end="url(#arrow-gray)" />
+
+
+  <path d="M 3440 3930 L 3440 3990" stroke="#646a73" stroke-width="4" fill="none" />
+
+  <path d="M 3440 3990 L 3440 4100" stroke="#646a73" stroke-width="4" fill="none" marker-end="url(#arrow-gray)" />
+
+  <path d="M 3440 3990 L 2020 3990" stroke="#646a73" stroke-width="4" fill="none" marker-end="url(#arrow-gray)" />
+  <path d="M 1700 3990 L 870 3990" stroke="#646a73" stroke-width="4" fill="none" marker-end="url(#arrow-gray)" />
+  <path d="M 570 3990 L 350 3990" stroke="#5178c6" stroke-width="5" fill="none" />
+
+
+
+
+  <path d="M 900 4570 L 3380 4570" stroke="#5178c6" stroke-width="5" fill="none" marker-end="url(#arrow-blue)" />
+  <path d="M 3440 4590 L 3440 4700" stroke="#5178c6" stroke-width="5" fill="none" marker-end="url(#arrow-blue)" />
+
+
+  <path d="M 3440 4840 L 3440 4900 L 720 4900 L 720 5000" stroke="#5178c6" stroke-width="5" fill="none" marker-end="url(#arrow-blue)" />
+  <text x="2100" y="4880" font-size="32" fill="#5178c6">跨进程 Bundle 返回</text>
+
+
+  <path d="M 3440 1740 L 3440 1780 L 4650 1780 L 4650 5050 L 970 5050" stroke="#509863" stroke-width="5" stroke-dasharray="12 8" fill="none" marker-end="url(#arrow-green)" />
+  <text x="4670" y="5030" font-size="28" fill="#509863">本地返回</text>
+
+
+
+
+
+  <g transform="translate(480, 300)">
+    <rect width="480" height="80" rx="8" fill="#eae2fe" stroke="#8569cb" stroke-width="2" />
+    <text x="240" y="48" font-size="28" font-weight="bold" fill="#1f2329" text-anchor="middle">ContentResolver.call</text>
+  </g>
+  <g transform="translate(460, 500)">
+    <rect width="520" height="80" rx="8" fill="#eae2fe" stroke="#8569cb" stroke-width="2" />
+    <text x="260" y="48" font-size="28" fill="#1f2329" text-anchor="middle">ActivityThread.acquireExistingProvider</text>
+  </g>
+
+  <polygon points="720,700 840,750 720,800 600,750" fill="#fef1ce" stroke="#d4b45b" stroke-width="3" />
+  <text x="720" y="760" font-size="26" font-weight="bold" fill="#1f2329" text-anchor="middle">本地缓存命中？</text>
+
+  <polygon points="720,900 840,950 720,1000 600,950" fill="#fef1ce" stroke="#d4b45b" stroke-width="3" />
+  <text x="720" y="960" font-size="26" font-weight="bold" fill="#1f2329" text-anchor="middle">缓存对象类型？</text>
+
+  <g transform="translate(480, 1200)">
+    <rect width="480" height="80" rx="8" fill="#eae2fe" stroke="#5178c6" stroke-width="3" />
+    <text x="240" y="48" font-size="28" font-weight="bold" fill="#1f2329" text-anchor="middle">B 跨进程缓存命中：远端 proxy</text>
+  </g>
+
+  <g transform="translate(590, 1360)">
+    <rect width="260" height="80" rx="8" fill="#eae2fe" stroke="#5178c6" stroke-width="2" />
+    <text x="130" y="48" font-size="28" font-weight="bold" fill="#1f2329" text-anchor="middle">D 缓存 proxy</text>
+  </g>
+
+  <g transform="translate(570, 2090)">
+    <rect width="300" height="80" rx="8" fill="#eae2fe" stroke="#5178c6" stroke-width="2" />
+    <text x="150" y="48" font-size="28" font-weight="bold" fill="#1f2329" text-anchor="middle">取得 proxy (Alive)</text>
+  </g>
+
+  <g transform="translate(570, 3950)">
+    <rect width="300" height="80" rx="8" fill="#eae2fe" stroke="#5178c6" stroke-width="2" />
+    <text x="150" y="48" font-size="28" font-weight="bold" fill="#1f2329" text-anchor="middle">取得缓存 proxy (Cold)</text>
+  </g>
+
+  <g transform="translate(540, 4530)">
+    <rect width="360" height="80" rx="8" fill="#eae2fe" stroke="#5178c6" stroke-width="3" />
+    <text x="180" y="48" font-size="30" font-weight="bold" fill="#1f2329" text-anchor="middle">Binder transaction</text>
+  </g>
+
+  <g transform="translate(470, 5000)">
+    <rect width="500" height="100" rx="8" fill="#ffffff" stroke="#8569cb" stroke-width="3" />
+    <text x="250" y="58" font-size="30" font-weight="bold" fill="#1f2329" text-anchor="middle">Bundle 返回 / releaseProvider</text>
+  </g>
+
+
+
+  <g transform="translate(1880, 700)">
+    <rect width="560" height="100" rx="8" fill="#f0f4fc" stroke="#5263a5" stroke-width="2" />
+    <text x="280" y="45" font-size="28" font-weight="bold" fill="#1f2329" text-anchor="middle">AMS.getContentProvider</text>
+    <text x="280" y="80" font-size="24" fill="#646a73" text-anchor="middle">解析 ProviderInfo / ContentProviderRecord</text>
+  </g>
+
+  <polygon points="2160,1100 2310,1150 2160,1200 2010,1150" fill="#fef1ce" stroke="#d4b45b" stroke-width="3" />
+  <text x="2160" y="1160" font-size="28" font-weight="bold" fill="#1f2329" text-anchor="middle">canRunHere？</text>
+
+  <polygon points="2160,1350 2310,1400 2160,1450 2010,1400" fill="#fef1ce" stroke="#d4b45b" stroke-width="3" />
+  <text x="2160" y="1410" font-size="26" font-weight="bold" fill="#1f2329" text-anchor="middle">Provider 已发布？</text>
+
+
+  <g transform="translate(1500, 1350)">
+    <rect width="440" height="100" rx="8" fill="#f0f4fc" stroke="#5263a5" stroke-width="2" />
+    <text x="220" y="45" font-size="28" font-weight="bold" fill="#1f2329" text-anchor="middle">建立 ContentProviderConnection</text>
+    <text x="220" y="80" font-size="26" font-weight="bold" fill="#1f2329" text-anchor="middle">返回 proxy</text>
+  </g>
+
+  <polygon points="2160,1950 2310,2000 2160,2050 2010,2000" fill="#fef1ce" stroke="#d4b45b" stroke-width="3" />
+  <text x="2160" y="2010" font-size="26" font-weight="bold" fill="#1f2329" text-anchor="middle">宿主进程已存活？</text>
+
+
+  <g transform="translate(2400, 1950)">
+    <rect width="440" height="100" rx="8" fill="#f0f4fc" stroke="#5263a5" stroke-width="2" />
+    <text x="220" y="45" font-size="28" font-weight="bold" fill="#1f2329" text-anchor="middle">scheduleInstallProvider</text>
+    <text x="220" y="80" font-size="24" fill="#646a73" text-anchor="middle">等待 publish 或超时</text>
+  </g>
+
+  <g transform="translate(1700, 2090)">
+    <rect width="320" height="80" rx="8" fill="#f0f4fc" stroke="#5263a5" stroke-width="2" />
+    <text x="160" y="48" font-size="26" fill="#1f2329" text-anchor="middle">接收 publish / 唤醒 (启动中)</text>
+  </g>
+
+
+  <g transform="translate(1920, 2250)">
+    <rect width="480" height="80" rx="8" fill="#f0f4fc" stroke="#5263a5" stroke-width="2" />
+    <text x="240" y="48" font-size="28" font-weight="bold" fill="#1f2329" text-anchor="middle">startProcessLocked / Zygote fork</text>
+  </g>
+
+  <g transform="translate(1900, 2650)">
+    <rect width="520" height="80" rx="8" fill="#f0f4fc" stroke="#5263a5" stroke-width="2" />
+    <text x="260" y="48" font-size="28" font-weight="bold" fill="#1f2329" text-anchor="middle">bindApplication(AppBindData/providers)</text>
+  </g>
+
+  <g transform="translate(1700, 3950)">
+    <rect width="320" height="80" rx="8" fill="#f0f4fc" stroke="#5263a5" stroke-width="2" />
+    <text x="160" y="48" font-size="26" fill="#1f2329" text-anchor="middle">接收 publish / 唤醒 (冷启动)</text>
+  </g>
+
+
+
+
+
+  <g transform="translate(3000, 910)">
+    <rect width="440" height="80" rx="8" fill="#dff5e5" stroke="#509863" stroke-width="3" />
+    <text x="220" y="48" font-size="28" font-weight="bold" fill="#1f2329" text-anchor="middle">A 本地 Transport (同进程)</text>
+  </g>
+
+
+  <g transform="translate(3600, 1110)">
+    <rect width="440" height="80" rx="8" fill="#ffffff" stroke="#509863" stroke-width="2" />
+    <text x="220" y="48" font-size="28" fill="#1f2329" text-anchor="middle">C 返回 holder (provider=null)</text>
+  </g>
+  <g transform="translate(3600, 1310)">
+    <rect width="440" height="120" rx="8" fill="#dff5e5" stroke="#509863" stroke-width="2" />
+    <text x="220" y="45" font-size="28" font-weight="bold" fill="#1f2329" text-anchor="middle">C 单个 installProvider(info)</text>
+    <text x="220" y="80" font-size="24" fill="#646a73" text-anchor="middle">只安装被请求 Provider</text>
+    <text x="220" y="105" font-size="24" font-weight="bold" fill="#509863" text-anchor="middle">→ attachInfo/onCreate → 写本地 map</text>
+  </g>
+
+
+  <rect x="4100" y="1280" width="270" height="140" rx="4" fill="#fef1ce" stroke="#d4b45b" stroke-width="2"/>
+  <text x="4120" y="1315" font-size="22" fill="#1f2329">attachBaseContext 返回</text>
+  <text x="4120" y="1345" font-size="22" fill="#1f2329">后仍批量 installProviders</text>
+  <text x="4120" y="1375" font-size="22" fill="#1f2329">AOSP常见创建候选实例</text>
+  <text x="4120" y="1405" font-size="22" fill="#1f2329">写 map 去重并避免环依赖</text>
+
+
+  <rect x="3390" y="1550" width="100" height="40" rx="20" fill="#dff5e5" stroke="#509863" stroke-width="3" />
+  <text x="3440" y="1578" font-size="20" font-weight="bold" fill="#509863" text-anchor="middle">LOCAL</text>
+
+  <g transform="translate(3200, 1650)">
+    <rect width="480" height="90" rx="8" fill="#dff5e5" stroke="#509863" stroke-width="3" />
+    <text x="240" y="40" font-size="28" font-weight="bold" fill="#1f2329" text-anchor="middle">本地 Transport.call</text>
+    <text x="240" y="75" font-size="28" font-weight="bold" fill="#1f2329" text-anchor="middle">→ ContentProvider.call</text>
+  </g>
+
+
+
+  <g transform="translate(3200, 1950)">
+    <rect width="480" height="100" rx="8" fill="#ffffff" stroke="#bbbfc4" stroke-width="2" />
+    <text x="240" y="45" font-size="28" font-weight="bold" fill="#1f2329" text-anchor="middle">远端 installProvider (Alive)</text>
+    <text x="240" y="80" font-size="28" font-weight="bold" fill="#1f2329" text-anchor="middle">→ publishContentProviders</text>
+  </g>
+
+
+  <g transform="translate(3230, 2450)">
+    <rect width="420" height="80" rx="8" fill="#ffffff" stroke="#bbbfc4" stroke-width="2" />
+    <text x="210" y="48" font-size="28" fill="#1f2329" text-anchor="middle">ActivityThread.main / attach</text>
+  </g>
+
+  <g transform="translate(3250, 2850)">
+    <rect width="380" height="80" rx="8" fill="#ffffff" stroke="#bbbfc4" stroke-width="2" />
+    <text x="190" y="48" font-size="28" font-weight="bold" fill="#1f2329" text-anchor="middle">handleBindApplication</text>
+  </g>
+
+  <g transform="translate(3170, 3050)">
+    <rect width="540" height="100" rx="8" fill="#ffffff" stroke="#bbbfc4" stroke-width="2" />
+    <text x="270" y="45" font-size="28" font-weight="bold" fill="#1f2329" text-anchor="middle">makeApplication</text>
+    <text x="270" y="80" font-size="26" fill="#646a73" text-anchor="middle">构造 Application / attachBaseContext</text>
+  </g>
+
+  <g transform="translate(3250, 3250)">
+    <rect width="380" height="80" rx="8" fill="#ffffff" stroke="#bbbfc4" stroke-width="2" />
+    <text x="190" y="48" font-size="28" font-weight="bold" fill="#1f2329" text-anchor="middle">设置 mInitialApplication</text>
+  </g>
+
+  <g transform="translate(3170, 3450)">
+    <rect width="540" height="80" rx="8" fill="#ffffff" stroke="#bbbfc4" stroke-width="2" />
+    <text x="270" y="48" font-size="28" font-weight="bold" fill="#1f2329" text-anchor="middle">installContentProviders / installProvider</text>
+  </g>
+
+  <g transform="translate(3220, 3650)">
+    <rect width="440" height="80" rx="8" fill="#ffffff" stroke="#bbbfc4" stroke-width="2" />
+    <text x="220" y="48" font-size="28" font-weight="bold" fill="#1f2329" text-anchor="middle">Provider.attachInfo / onCreate</text>
+  </g>
+
+  <g transform="translate(3240, 3850)">
+    <rect width="400" height="80" rx="8" fill="#ffffff" stroke="#bbbfc4" stroke-width="2" />
+    <text x="200" y="48" font-size="28" font-weight="bold" fill="#1f2329" text-anchor="middle">publishContentProviders</text>
+  </g>
+
+  <g transform="translate(3260, 4100)">
+    <rect width="360" height="80" rx="8" fill="#ffffff" stroke="#bbbfc4" stroke-width="2" />
+    <text x="180" y="48" font-size="28" font-weight="bold" fill="#1f2329" text-anchor="middle">Application.onCreate</text>
+  </g>
+
+
+  <rect x="2940" y="4350" width="1000" height="80" rx="6" fill="#eff0f1" stroke="#dee0e3" />
+  <text x="3440" y="4398" font-size="26" font-weight="bold" fill="#5263a5" text-anchor="middle">生命周期：Application 构造/attachBaseContext → Provider.onCreate → Application.onCreate</text>
+
+
+  <rect x="3380" y="4550" width="120" height="40" rx="20" fill="#eae2fe" stroke="#5178c6" stroke-width="3" />
+  <text x="3440" y="4578" font-size="20" font-weight="bold" fill="#5178c6" text-anchor="middle">REMOTE</text>
+
+  <g transform="translate(3090, 4700)">
+    <rect width="700" height="140" rx="8" fill="#f0f4fc" stroke="#5178c6" stroke-width="3" />
+    <text x="350" y="45" font-size="28" font-weight="bold" fill="#1f2329" text-anchor="middle">Transport Stub 校验 → ContentProvider.call</text>
+    <text x="350" y="90" font-size="22" fill="#5178c6" text-anchor="middle">exported / permission / AppOps / URI grant / attribution</text>
+    <text x="350" y="125" font-size="22" fill="#646a73" text-anchor="middle">业务 call 标注服务端 Binder 线程池并发执行</text>
+  </g>
+
+
+  <rect x="200" y="5400" width="4400" height="240" rx="12" fill="#ffffff" stroke="#dee0e3" stroke-width="3"/>
+  <text x="240" y="5455" font-size="34" font-weight="bold" fill="#1f2329">stable / unstable 引用计数</text>
+  <text x="240" y="5505" font-size="30" fill="#1f2329">· 本质：同一 IContentProvider 连接的两类引用计数，不是两个实例或 Proxy。</text>
+  <text x="240" y="5555" font-size="30" fill="#1f2329">· Stable：参与 AMS 进程优先级与死亡依赖清理，但不保证远端永不死亡。</text>
+  <text x="240" y="5605" font-size="30" fill="#1f2329">· Unstable：远端死亡后处理 DeadObjectException、unstableProviderDied，并按需重试。</text>
+  <text x="2400" y="5605" font-size="30" font-weight="bold" fill="#5178c6">· 常见策略：call 用 stable；query 常先 unstable，死亡后转 stable 重试。</text>
+
+  <rect x="200" y="5700" width="4400" height="240" rx="12" fill="#ffffff" stroke="#dee0e3" stroke-width="3"/>
+  <text x="240" y="5755" font-size="34" font-weight="bold" fill="#1f2329">性能层次</text>
+  <text x="240" y="5805" font-size="30" font-weight="bold" fill="#509863">· A 本地已安装：本地 Java 直调，路径最短。</text>
+  <text x="240" y="5855" font-size="30" font-weight="bold" fill="#509863">· C 本地首次安装：增加 AMS 寻址和单个 Provider 本地安装。</text>
+  <text x="2400" y="5805" font-size="30" font-weight="bold" fill="#5178c6">· B/D 跨进程热调用：走 Binder IPC，无目标进程冷启动。</text>
+  <text x="2400" y="5855" font-size="30" font-weight="bold" fill="#646a73">· E 跨进程冷启动：叠加 fork、Application attach、Provider 安装与发布。</text>
+
+
+  <text x="4700" y="6100" font-size="24" fill="#bbbfc4" text-anchor="end">由 Mind AI 生成</text>
+</svg>
