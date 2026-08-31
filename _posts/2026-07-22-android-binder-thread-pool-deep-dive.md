@@ -1,7 +1,7 @@
 ---
 title: 深入拆解 Binder 线程池：从用户态线程到内核调度
 date: 2026-07-22 10:00:00 +0800
-categories: [Android开发]
+categories: [Android]
 tags: [Android, Binder, 源码分析, 进程通信]
 ---
 

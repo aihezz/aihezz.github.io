@@ -1,7 +1,7 @@
 ---
 title: 深入理解 ContentProvider：从 call 调用到进程拉起与 Provider 生命周期
 date: 2026-08-31 21:00:00 +0800
-categories: [Android开发]
+categories: [Android]
 tags: [Android, ContentProvider, Binder, IPC, Framework, 源码分析]
 lang: zh-CN
 ---

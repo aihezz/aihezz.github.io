@@ -1,7 +1,7 @@
 ---
 title: 深入拆解 lifecycleScope.launch：从编译器魔法到结构化并发
 date: 2026-06-04 12:00:00 +0800
-categories: [Android开发]
+categories: [Android]
 tags: [Kotlin, 协程, 源码分析]
 ---
 
