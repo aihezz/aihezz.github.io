@@ -148,9 +148,228 @@ public final IContentProvider acquireProvider(
 }
 ```
 
-`acquireExistingProvider()` 会使用 `authority + userId` 查询 `mProviderMap`。如果命中，它还会检查 Binder 是否存活，并根据 stable/unstable 类型增加引用计数。
+表面看，`acquireExistingProvider()` 只是一次 Map 查询。实际上它处在三套状态之间：
 
-因此第一层分流非常明确：
+```text
+authority + userId
+  → ProviderClientRecord
+  → IContentProvider / Binder identity
+  → ProviderRefCount
+  → ContentProviderConnection（system_server）
+```
+
+理解这组映射，才能看懂为什么缓存命中后还要增加引用、为什么一个 Provider 的多个 authority 共享同一份计数，以及为什么最后一份引用释放时不能立刻删缓存。
+
+### 3.1 `ContentResolver` 如何把 stable/unstable 传给 `ActivityThread`
+
+应用拿到的 `ContentResolver`，具体实现是 `ContextImpl.ApplicationContentResolver`。它本身不维护 Provider，而是把操作转交给当前进程的 `ActivityThread`：
+
+```java
+protected IContentProvider acquireProvider(Context context, String auth) {
+    return mMainThread.acquireProvider(
+        context,
+        ContentProvider.getAuthorityWithoutUserId(auth),
+        resolveUserIdFromAuthority(auth),
+        true  // stable
+    );
+}
+
+protected IContentProvider acquireUnstableProvider(Context context, String auth) {
+    return mMainThread.acquireProvider(
+        context,
+        ContentProvider.getAuthorityWithoutUserId(auth),
+        resolveUserIdFromAuthority(auth),
+        false // unstable
+    );
+}
+```
+
+对应的释放操作也只是把同一个布尔值传回去：
+
+```java
+releaseProvider(provider)
+    → ActivityThread.releaseProvider(provider, true)
+
+releaseUnstableProvider(provider)
+    → ActivityThread.releaseProvider(provider, false)
+```
+
+这说明 stable/unstable 不是两套 Provider，也不是两种 Binder 对象。它是一次 acquire/release 对同一连接施加的引用语义。
+
+### 3.2 客户端为什么需要四张表
+
+`ActivityThread` 中和 Provider 缓存直接相关的结构主要有四个：
+
+```java
+// authority + userId → ProviderClientRecord
+ArrayMap<ProviderKey, ProviderClientRecord> mProviderMap;
+
+// Binder identity → stable/unstable 引用状态
+ArrayMap<IBinder, ProviderRefCount> mProviderRefCountMap;
+
+// 仅本进程 Provider：Binder → ProviderClientRecord
+ArrayMap<IBinder, ProviderClientRecord> mLocalProviders;
+
+// 仅本进程 Provider：组件名 → ProviderClientRecord
+ArrayMap<ComponentName, ProviderClientRecord> mLocalProvidersByName;
+```
+
+它们解决的是不同问题：
+
+| 结构 | Key | 回答的问题 |
+| --- | --- | --- |
+| `mProviderMap` | `authority + userId` | 这个 URI 应该落到哪个 `IContentProvider`？ |
+| `mProviderRefCountMap` | `IBinder` | 这条实际 Provider 连接还有多少 stable/unstable 引用？ |
+| `mLocalProviders` | 本地 Binder | 这个 Binder 对应哪个本地 Provider 记录？ |
+| `mLocalProvidersByName` | `ComponentName` | 这个 Provider 类是否已经在本进程实例化？ |
+
+这里特意把“寻址”和“生命周期”分开了。一个 Provider 可以声明多个以分号分隔的 authority。`installProviderAuthoritiesLocked()` 会把这些 authority 分别写入 `mProviderMap`，但它们指向同一个 `ProviderClientRecord`；引用计数则按 `provider.asBinder()` 存在 `mProviderRefCountMap` 中。
+
+所以：
+
+> authority 是查找维度，Binder identity 才是连接与计数维度。
+
+`ProviderClientRecord` 本身把四类对象绑在一起：
+
+```java
+final String[] mNames;
+final IContentProvider mProvider;
+final ContentProvider mLocalProvider;
+final ContentProviderHolder mHolder;
+```
+
+- `mProvider`：统一调用入口，本地时是 `Transport`，远端时是 proxy。
+- `mLocalProvider`：只有本进程 Provider 才有真实 Java 实例。
+- `mHolder`：携带 `ProviderInfo`、Binder 和 AMS 连接等系统元数据。
+
+### 3.3 `acquireExistingProvider()` 的完整逻辑
+
+核心代码可以简化为：
+
+```java
+public IContentProvider acquireExistingProvider(
+        Context context, String auth, int userId, boolean stable) {
+    synchronized (mProviderMap) {
+        ProviderKey key = new ProviderKey(auth, userId);
+        ProviderClientRecord record = mProviderMap.get(key);
+        if (record == null) {
+            return null;
+        }
+
+        IContentProvider provider = record.mProvider;
+        IBinder binder = provider.asBinder();
+        if (!binder.isBinderAlive()) {
+            handleUnstableProviderDiedLocked(binder, true);
+            return null;
+        }
+
+        ProviderRefCount ref = mProviderRefCountMap.get(binder);
+        if (ref != null) {
+            incProviderRefLocked(ref, stable);
+        }
+        return provider;
+    }
+}
+```
+
+按执行顺序拆开：
+
+1. 用 `authority + userId` 构造 `ProviderKey`。同一个 authority 在不同 Android User 下不是同一个 Provider 实例。
+2. 在 `mProviderMap` 中查 `ProviderClientRecord`。未命中直接返回 `null`，让外层进入 AMS 获取流程。
+3. 取出 `IContentProvider`，再取它的 Binder identity。
+4. 调用 `isBinderAlive()`。缓存项存在不代表远端进程仍存活。
+5. Binder 已死时，立即清理这条 Binder 对应的引用状态和所有 authority 映射，然后返回 `null`。下一次获取会重新进入 AMS。
+6. Binder 存活时，按 stable/unstable 增加本进程引用，再返回同一个 Provider。
+
+整个方法持有 `mProviderMap` 锁，因此 authority 缓存、Binder 计数和死亡清理对本进程其他线程是一个一致状态。
+
+### 3.4 为什么缓存命中不等于每次都通知 AMS
+
+`ProviderRefCount` 保存的是本进程聚合后的状态：
+
+```java
+final ContentProviderHolder holder;
+final ProviderClientRecord client;
+int stableCount;
+int unstableCount;
+boolean removePending;
+```
+
+这一套普通引用计数主要针对需要释放的远端 Provider。本进程 Provider 会被当作进程内组件长期保存；`holder.noReleaseNeeded=true` 的特殊 Provider 也不会走普通的 `0 → remove` 生命周期。源码中有的版本不给本地 Provider 建 `ProviderRefCount`，有的特殊远端记录会使用哨兵计数。业务代码不应依赖这些哨兵值，只需要理解：`releaseProvider()` 只有在 `mProviderRefCountMap` 找到正常计数记录时才真正减计数。
+
+应用进程里可能有很多调用方同时使用同一个 Provider。如果每一次 acquire/release 都跨 Binder 更新 AMS，成本会很高。因此 `incProviderRefLocked()` 的策略是：
+
+- 本地计数每次都变。
+- 只有某类计数从 `0 → 1` 时，才需要告诉 AMS“本进程开始持有这类引用”。
+- 从 `1 → 2 → 3` 只在本进程累加，AMS 不需要知道进程内部有几个 Java 调用方。
+
+稳定引用第一次出现时：
+
+```java
+stableCount++;
+if (stableCount == 1) {
+    ActivityManager.getService().refContentProvider(
+        connection,
+        +1, // stable delta
+        0   // unstable delta
+    );
+}
+```
+
+unstable 同理，第一次出现时发送 `(0, +1)`。
+
+这揭示了客户端计数与 AMS 计数的关系：
+
+```text
+ActivityThread 的 count
+    = 本进程内部精确使用次数
+
+AMS ContentProviderConnection 的 count
+    = 这个客户端进程是否持有 stable/unstable 关系
+      以及系统侧需要维护的连接状态
+```
+
+两边都叫 count，但粒度不同。前者聚合 Java 调用方，后者管理进程间依赖。
+
+### 3.5 缓存未命中时，为什么还要按 authority 加一把锁
+
+`acquireProvider()` 在本地未命中后，不会持有 `mProviderMap` 锁直接调用 AMS，而是为同一个 `authority + userId` 取得专用锁，再执行慢路径：
+
+```java
+ProviderKey key = getGetProviderKey(auth, userId);
+synchronized (key) {
+    holder = ActivityManager.getService().getContentProvider(...);
+}
+```
+
+原因有两个：
+
+1. AMS 查询、目标进程启动和 Provider 安装可能很慢，不能长期占用全局 `mProviderMap` 锁。
+2. 同进程 Provider 的获取可能发生重入；持有全局锁跨进程调用会放大死锁风险。
+
+专用锁只串行化“同一个 authority 的首次获取”，不同 authority 仍可并行。新版 AOSP 还让 `ProviderKey` 暂存异步发布返回的 `ContentProviderHolder`，在本地等待超时后继续安装。
+
+即使两个线程发生竞争，`installProvider()` 仍有最后一道去重：进入 `mProviderMap` 锁后检查 Binder 或组件名是否已经安装。败者复用胜出的记录，并把自己刚从 AMS 获取的多余连接引用归还。
+
+### 3.6 首次慢路径中的“连接转移”
+
+缓存未命中时，AMS 在返回远端 `ContentProviderHolder` 前，已经为这次请求建立或增加了一份 `ContentProviderConnection` 引用。客户端拿到 holder 后再调用 `installProvider()`：
+
+- 本地还没有该 Binder：写入 authority 映射，按本次 stable/unstable 类型创建初始 `ProviderRefCount(1, 0)` 或 `(0, 1)`。
+- 本地已经有同一 Binder：说明另一个线程抢先安装成功。当前线程不再创建第二份缓存，而是增加已有本地计数，并调用 AMS `removeContentProvider(holder.connection, stable)` 归还自己这次慢路径多拿到的系统侧引用。
+
+可以把这段理解成：
+
+```text
+AMS 先为每个慢路径请求预留一份连接引用
+  → 客户端安装竞争
+      ├── 胜者：把引用纳入新的 ProviderRefCount
+      └── 败者：复用胜者缓存，归还多余的 AMS 引用
+```
+
+这也是 `installProvider()` 不只是“把 Binder 放进 Map”的原因。它还是客户端缓存与 system_server 连接账本之间的对账点。
+
+因此第一层分流仍然是：
 
 ```text
 本地缓存命中
@@ -167,6 +386,10 @@ public final IContentProvider acquireProvider(
 frameworks/base/core/java/android/app/ActivityThread.java
   - acquireProvider()
   - acquireExistingProvider()
+  - incProviderRefLocked()
+  - releaseProvider()
+  - completeRemoveProvider()
+  - handleUnstableProviderDiedLocked()
   - installProvider()
 ```
 
@@ -440,24 +663,156 @@ try {
 
 ## 十二、stable 与 unstable：两类引用，不是两个 Provider
 
-`ActivityThread.ProviderRefCount` 同时维护：
+前面已经看到，`ApplicationContentResolver` 最终只是把一个 `stable` 布尔值传给 `ActivityThread`。真正的状态机由客户端 `ProviderRefCount` 和服务端 `ContentProviderConnection` 共同完成。
+
+### 12.1 第一次安装时，计数从哪里来
+
+远端 Provider 第一次被安装到客户端缓存时，`installProvider()` 会按本次 acquire 类型创建 `ProviderRefCount`：
 
 ```java
-int stableCount;
-int unstableCount;
+ProviderRefCount ref = stable
+        ? new ProviderRefCount(holder, client, 1, 0)
+        : new ProviderRefCount(holder, client, 0, 1);
+
+mProviderRefCountMap.put(provider.asBinder(), ref);
 ```
 
-引用变化会通过 AMS 的 `refContentProvider()` 同步到系统侧 `ContentProviderConnection`。
+对应地，AMS 在 `getContentProviderImpl()` 中创建或复用 `ContentProviderConnection`：
 
-### Stable 引用
+```text
+Provider 侧 ContentProviderRecord
+        ↕
+ContentProviderConnection
+        ↕
+Client 侧 ProcessRecord
+```
+
+这条 connection 同时挂在 Provider 的连接列表和客户端进程的 Provider 连接列表中。它既是计数容器，也是 OOM 调整、进程关联统计、等待发布和死亡清理的凭据。
+
+首次请求 stable 时，系统侧初始化为 `stable=1, unstable=0`；首次请求 unstable 时反过来。后续同一客户端进程再次获取同一 Provider，会复用这条 connection。
+
+### 12.2 Stable 引用意味着什么
 
 stable 表达调用方对 Provider 的稳定依赖。它参与目标进程优先级计算和 Provider 死亡后的依赖清理，但不保证远端进程永远不死。
 
-### Unstable 引用
+在 Android 11 的 AMS 获取路径中，连接建立后会调用 `updateOomAdjLocked(...GET_PROVIDER)`。新版本则把 `ContentProviderConnection` 纳入统一 OOM Adjuster 连接模型。实现形式在演进，但核心语义一致：系统知道“客户端进程正在依赖这个 Provider 进程”，并据此重新评估宿主进程的重要性。
+
+stable 不是“杀不死”。目标进程仍可能因为崩溃、强杀或系统策略消失；stable 只表示更强的依赖关系和更严格的死亡处理。
+
+Android 11 的 Provider 进程死亡清理逻辑更能体现“严格”在哪里：如果某个 `ContentProviderConnection.stableCount > 0`，非 persistent 的依赖客户端可能被系统以 `DEPENDENCY_DIED` 原因终止；只有不存在 stable 引用时，系统才走 `unstableProviderDied()` 通知客户端自行清缓存和恢复。
+
+所以 stable/unstable 的差异不只是 OOM 权重：
+
+```text
+stable 依赖：Provider 意外死亡可能连带终止依赖方
+unstable 依赖：允许客户端观察死亡并尝试重新获取
+```
+
+具体退出策略会随 Android 版本演进，但“stable 是强依赖、unstable 是可恢复弱依赖”是更准确的工程语义。
+
+### 12.3 Unstable 引用与故障恢复
 
 unstable 表达较弱依赖。远端死亡时，调用方应处理 `DeadObjectException`，调用 `unstableProviderDied()` 清理旧关系，再决定是否重新获取 Provider。
 
-### `call()` 与 `query()` 的区别
+客户端发现 Binder 已死时，`handleUnstableProviderDiedLocked()` 会：
+
+1. 从 `mProviderRefCountMap` 删除该 Binder 的计数。
+2. 遍历 `mProviderMap`，删除所有指向同一 Binder 的 authority 映射。
+3. 如果死亡是客户端在调用时主动发现的，通知 AMS `unstableProviderDied(connection)`。
+
+AMS 不会盲信客户端。它会先 `pingBinder()`；确认 Binder 确实死亡且 connection 仍指向同一 Provider 后，才按进程死亡路径继续清理。这样可以避免客户端误报或 Provider 已重启换代造成竞态。
+
+### 12.4 `releaseProvider()` 不是简单的 `count--`
+
+普通 release 分三种情况。
+
+#### 情况一：本地还有同类引用
+
+例如 stable 从 3 降到 2：
+
+```text
+客户端 stableCount: 3 → 2
+AMS：不通知
+连接：继续保留
+```
+
+AMS 只关心客户端进程是否仍持有 stable 关系，不需要知道进程内部有 2 个还是 3 个使用者。
+
+#### 情况二：某类引用归零，但另一类还存在
+
+例如 `stable:1→0`，同时 `unstableCount>0`：
+
+```java
+refContentProvider(connection, -1, 0);
+```
+
+客户端通知 AMS 去掉 stable 关系，但连接仍由 unstable 引用维持。反过来，unstable 归零而 stable 仍存在时，发送 `(0, -1)`。
+
+#### 情况三：stable 和 unstable 都归零
+
+最后一份 stable 被释放时，Android 11 的客户端不会立即把系统侧总计数降到零，而是先做一次转换：
+
+```java
+refContentProvider(
+    connection,
+    -1, // 去掉最后一份 stable
+    +1  // 临时保留一份 unstable
+);
+```
+
+随后设置 `removePending=true`，向 `ActivityThread.H` 发送一个延迟 `CONTENT_PROVIDER_RETAIN_TIME` 的 `REMOVE_PROVIDER` 消息。Android 11/当前客户端源码中该保留时间为 1 秒。
+
+这 1 秒不是业务超时，而是防抖窗口：很多代码会在很短时间内释放后又重新查询同一个 Provider。立即删除缓存、拆连接，再马上走 AMS 重建，会造成明显抖动。
+
+### 12.5 移除窗口内重新 acquire 会发生什么
+
+假设本地状态是：
+
+```text
+stable=0, unstable=0, removePending=true
+AMS 侧仍保留一份临时 unstable
+```
+
+此时再次 stable acquire：
+
+1. `acquireExistingProvider()` 命中原缓存。
+2. `incProviderRefLocked()` 将 stable 从 0 加到 1。
+3. 发现 `removePending=true`，取消延迟移除消息。
+4. 调用 `refContentProvider(connection, +1, -1)`：把 AMS 侧临时 unstable 原子转换为 stable。
+
+如果重新获取的是 unstable，只需取消 pending remove；AMS 侧那份临时 unstable 正好可以继续代表这条关系，不必重复加一。
+
+源码注释把 stable 重获形容为“从死亡边缘抢回 Provider”。本质上，这是一个连接复用优化，同时避免两次独立 Binder 更新之间出现总引用短暂归零。
+
+### 12.6 延迟到期后如何真正删除
+
+`completeRemoveProvider()` 执行时还会再次检查 `removePending`，因为延迟期间可能已经发生重新 acquire。
+
+- `removePending=false`：说明 Provider 又被使用，放弃本次删除。
+- 仍为 `true`：从 `mProviderRefCountMap` 删除 Binder 计数；从 `mProviderMap` 删除所有指向该 Binder 的 authority；最后调用 AMS `removeContentProvider(connection, false)`，释放系统侧那份临时 unstable。
+
+AMS 侧计数变成 0 后，会把 `ContentProviderConnection` 同时从 Provider 和客户端进程的连接列表移除，停止进程关联统计，并重新评估 Provider 宿主进程的 OOM 优先级。
+
+这里还有一个刻意设计的 API 边界：`refContentProvider(connection, stableDelta, unstableDelta)` 只负责在连接仍存在时调整两类计数，它会拒绝让 `stable + unstable` 直接变成 0。真正的最后一次释放必须走 `removeContentProvider()`，再由 `decProviderCountLocked()` 完成连接拆除。
+
+为什么要分两条 API？因为“改一个数字”和“销毁一条系统关系”不是同一件事。归零时还必须同步完成：
+
+- 从 `ContentProviderRecord.connections` 移除连接。
+- 从客户端 `ProcessRecord` 的 Provider 连接列表移除。
+- 停止 procstats association。
+- 记录 Provider 最近使用时间，减少宿主进程抖动。
+- 重新计算 Provider 宿主进程的 OOM adj。
+
+把归零限制在专用删除路径，可以避免某个普通 delta 更新绕过这些副作用。
+
+这里要区分两个“延迟”：
+
+- Android 11 客户端的 `CONTENT_PROVIDER_RETAIN_TIME`：用于本进程缓存和临时 unstable 的 1 秒防抖。
+- 新版 system_server 中还可能对最后连接移除增加更长的延迟，以减少 Provider 进程反复升降和连接 churn。
+
+具体时间是版本实现细节，不应当被业务依赖；稳定的设计意图是“最后引用释放后不要立刻抖动式拆建”。
+
+### 12.7 `call()` 与 `query()` 为什么采用不同策略
 
 Android 30 的常见实现是：
 
@@ -467,6 +822,52 @@ Android 30 的常见实现是：
 - query 成功后，`CursorWrapperInner` 持有 stable 引用，直到 Cursor 关闭才释放。
 
 因此，不能把 stable/unstable 简化成“所有 API 都先 unstable，失败再 stable”。具体策略取决于 API 路径和 Android 版本。
+
+把一次完整生命周期写成状态表，会更直观：
+
+| 动作 | 客户端 `ProviderRefCount` | AMS `ContentProviderConnection` |
+| --- | --- | --- |
+| 第一次 stable acquire | `s=1,u=0` | 新建连接，`s=1,u=0` |
+| 同一客户端进程再次 stable acquire | `s=2,u=0` | 通常仍是 `s=1,u=0` |
+| 第一次 unstable acquire | `s=2,u=1` | `s=1,u=1` |
+| 释放一份 stable | `s=1,u=1` | 不变 |
+| 最后一份 stable 释放，unstable 仍在 | `s=0,u=1` | `s=0,u=1` |
+| 所有引用释放 | `s=0,u=0, pending` | 临时保留 `u=1` |
+| 保留期内重新 stable acquire | `s=1,u=0` | 原子转换为 `s=1,u=0` |
+| 保留期结束且无人重获 | 删除本地缓存 | 删除 connection，更新 OOM |
+| 远端 Binder 死亡 | 立即删 Binder 计数和全部 authority 映射 | 确认死亡并进入进程清理 |
+
+### 12.8 从这套实现可以推导出的通用设计
+
+Provider 的引用管理不是孤立技巧，它体现了几种常见的系统设计方法：
+
+1. **寻址与资源身份分离**：authority 用来查找，Binder identity 用来判定“是不是同一条真实连接”。
+2. **进程内聚合、跨进程降频**：先把多个 Java 调用方聚合成边界变化，再通知 system_server。
+3. **最后引用释放采用两阶段提交**：先进入 pending 状态并保留临时引用，延迟到期后再真正拆连接。
+4. **慢路径必须可并发去重**：authority 级锁减少重复请求，安装阶段再按 Binder/组件名做最终仲裁。
+5. **死亡清理按资源身份反向扫索引**：Binder 一死，删除所有引用它的 authority，避免留下可命中但不可用的缓存。
+6. **连接对象承载调度语义**：`ContentProviderConnection` 不只是引用计数器，还连接 OOM、关联统计、等待发布和依赖死亡。
+
+用这六点回看 Service 绑定、Binder proxy 缓存或跨进程连接池，会发现相似问题都需要回答：查找键是什么、真实资源身份是什么、局部引用如何聚合、最后释放如何防抖、死亡如何一次清完全部索引。
+
+### 12.9 方法级源码阅读索引
+
+如果要沿本章自己读源码，建议按状态变化而不是按文件顺序：
+
+| 状态变化 | 入口方法 | 重点观察 |
+| --- | --- | --- |
+| API 选择 stable/unstable | `ContextImpl.ApplicationContentResolver` | `true/false` 如何传入 `ActivityThread` |
+| 缓存命中 | `acquireExistingProvider()` | `ProviderKey`、Binder 存活检查、计数增加 |
+| 缓存未命中 | `acquireProvider()` | authority 级锁、AMS 慢路径、等待发布 |
+| 写入缓存 | `installProviderAuthoritiesLocked()` | 多 authority 指向同一 `ProviderClientRecord` |
+| 安装竞争 | `installProvider()` | Binder/组件名去重、归还多余 AMS 引用 |
+| 本地引用增加 | `incProviderRefLocked()` | 只在 `0→1` 边界同步 AMS |
+| 本地引用释放 | `releaseProvider()` | `1→0`、临时 unstable、pending remove |
+| 延迟删除 | `completeRemoveProvider()` | 再检查竞态、清两张表、通知 AMS |
+| 远端死亡 | `handleUnstableProviderDiedLocked()` | 按 Binder 删除所有 authority 映射 |
+| 系统侧建连接 | `incProviderCountLocked()` | connection 同挂 provider/client、OOM/LRU |
+| 系统侧调计数 | `refContentProvider()` | delta 校验，不允许普通调整直接归零 |
+| 系统侧拆连接 | `removeContentProvider()` / `decProviderCountLocked()` | 连接、association、OOM 的完整收尾 |
 
 ---
 
